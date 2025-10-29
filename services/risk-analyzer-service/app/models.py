@@ -41,6 +41,22 @@ class RiskRescoringResult(BaseModel):
     factors: dict[str, int] = Field(default_factory=dict, description="Risk factor breakdown")
 
 
+class ViewVelocity(BaseModel):
+    """View velocity tracking for trend detection."""
+
+    video_id: str = Field(..., description="YouTube video ID")
+    current_views: int = Field(..., description="Current view count")
+    previous_views: int = Field(default=0, description="Previous view count")
+    views_gained: int = Field(default=0, description="Views gained since last check")
+    hours_elapsed: float = Field(
+        default=0.0, description="Hours since last measurement"
+    )
+    views_per_hour: float = Field(default=0.0, description="View velocity (views/hour)")
+    trending_score: float = Field(
+        default=0.0, ge=0.0, le=100.0, description="Trending score (0-100)"
+    )
+
+
 class AnalysisStats(BaseModel):
     """Statistics for risk analysis run."""
 
