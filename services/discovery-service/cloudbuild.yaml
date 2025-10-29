@@ -1,0 +1,34 @@
+# Cloud Build configuration for discovery service
+steps:
+  # Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_IMAGE_NAME}'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+    id: 'build-image'
+
+  # Push image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '${_IMAGE_NAME}'
+    id: 'push-image'
+
+# Substitutions (defaults, can be overridden)
+# _IMAGE_NAME, _SERVICE_NAME, and _ENVIRONMENT are passed from deploy script
+
+# Options
+options:
+  machineType: 'N1_HIGHCPU_8'
+  logging: CLOUD_LOGGING_ONLY
+
+# Timeout
+timeout: 600s
+
+# Images to store
+images:
+  - '${_IMAGE_NAME}'

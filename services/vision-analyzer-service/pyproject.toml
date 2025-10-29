@@ -1,0 +1,22 @@
+[project]
+name = "vision-analyzer-service"
+version = "0.1.0"
+description = "Analyze frames for IP infringement using Gemini 2.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.119.1",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic-settings>=2.10.0",
+    "google-genai>=1.46.0",
+    "pillow>=11.0.0",
+    "google-cloud-storage>=3.4.1",
+    "google-cloud-firestore>=2.21.0",
+    "google-cloud-pubsub>=2.31.1",
+    "google-cloud-bigquery>=3.38.0",
+    "google-cloud-secret-manager>=2.21.0",
+    "python-json-logger>=3.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

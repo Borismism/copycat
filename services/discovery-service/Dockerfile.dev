@@ -1,0 +1,37 @@
+# Development Dockerfile with hot-reload support
+FROM python:3.13-slim
+
+# Install UV and curl for health checks
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files
+COPY pyproject.toml ./
+
+# Install dependencies with increased timeout
+# Note: Using '.' instead of '-r pyproject.toml' ensures proper transitive dependency resolution
+ENV UV_HTTP_TIMEOUT=120
+RUN uv pip install --system --no-cache-dir fastapi uvicorn pydantic-settings google-api-python-client google-auth google-cloud-firestore google-cloud-pubsub google-cloud-secret-manager httpx python-json-logger pyyaml packaging
+
+# Copy initial app code (will be overridden by volume mount)
+COPY app/ ./app/
+COPY data/ ./data/
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Expose port
+EXPOSE 8080
+
+# Run with hot-reload enabled
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]

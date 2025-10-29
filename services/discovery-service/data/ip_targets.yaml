@@ -1,0 +1,105 @@
+# IP Targets Configuration for Discovery Service
+# These are the intellectual property targets we monitor for copyright violations
+
+targets:
+  # Justice League Characters
+  - name: "Superman"
+    type: "character"
+    keywords:
+      - "Superman AI"
+      - "Superman generated"
+      - "AI Superman"
+      - "Superman Sora"
+      - "Superman Runway"
+    description: "DC Comics character - Man of Steel"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "high"
+
+  - name: "Batman"
+    type: "character"
+    keywords:
+      - "Batman AI"
+      - "Batman generated"
+      - "AI Batman"
+      - "Batman Sora"
+      - "Dark Knight AI"
+    description: "DC Comics character - The Dark Knight"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "high"
+
+  - name: "Wonder Woman"
+    type: "character"
+    keywords:
+      - "Wonder Woman AI"
+      - "Wonder Woman generated"
+      - "AI Wonder Woman"
+      - "Wonder Woman Sora"
+    description: "DC Comics character - Amazon Princess"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "high"
+
+  - name: "The Flash"
+    type: "character"
+    keywords:
+      - "Flash AI"
+      - "The Flash AI"
+      - "Flash generated"
+      - "AI Flash"
+      - "Flash Sora"
+    description: "DC Comics character - Fastest Man Alive"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "medium"
+
+  - name: "Aquaman"
+    type: "character"
+    keywords:
+      - "Aquaman AI"
+      - "Aquaman generated"
+      - "AI Aquaman"
+      - "Aquaman Sora"
+    description: "DC Comics character - King of Atlantis"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "medium"
+
+  - name: "Cyborg"
+    type: "character"
+    keywords:
+      - "Cyborg AI"
+      - "Cyborg generated"
+      - "AI Cyborg"
+      - "Cyborg Sora"
+    description: "DC Comics character - Half-man half-machine"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "medium"
+
+  - name: "Green Lantern"
+    type: "character"
+    keywords:
+      - "Green Lantern AI"
+      - "Green Lantern generated"
+      - "AI Green Lantern"
+      - "Green Lantern Sora"
+    description: "DC Comics character - Intergalactic police"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "medium"
+
+  # Justice League Franchise
+  - name: "Justice League"
+    type: "character_franchise"
+    keywords:
+      - "Justice League AI"
+      - "Justice League generated"
+      - "AI Justice League"
+      - "Justice League Sora"
+      - "JLA AI"
+    description: "DC Comics superhero team franchise"
+    owner: "Warner Bros. Discovery / DC Comics"
+    enabled: true
+    priority: "high"

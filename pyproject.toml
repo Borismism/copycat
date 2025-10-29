@@ -1,0 +1,18 @@
+[project]
+name = "copycat"
+version = "0.1.0"
+description = "Microservices project workspace"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.uv.workspace]
+members = [
+    "services/*"
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
