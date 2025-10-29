@@ -14,7 +14,7 @@ members = [
     "discovery-service",
     "frame-extractor-service",
     "frontend-service",
-    "risk-scorer-service",
+    "risk-analyzer-service",
     "vision-analyzer-service",
 ]
 
@@ -1246,13 +1246,14 @@ wheels = [
 ]
 
 [[package]]
-name = "risk-scorer-service"
+name = "risk-analyzer-service"
 version = "0.1.0"
-source = { editable = "services/risk-scorer-service" }
+source = { editable = "services/risk-analyzer-service" }
 dependencies = [
     { name = "fastapi" },
     { name = "google-cloud-firestore" },
     { name = "google-cloud-pubsub" },
+    { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "python-json-logger" },
     { name = "uvicorn", extra = ["standard"] },
@@ -1263,6 +1264,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.119.1" },
     { name = "google-cloud-firestore", specifier = ">=2.21.0" },
     { name = "google-cloud-pubsub", specifier = ">=2.31.1" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic-settings", specifier = ">=2.10.0" },
     { name = "python-json-logger", specifier = ">=3.2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
