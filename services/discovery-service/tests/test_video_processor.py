@@ -691,3 +691,205 @@ class TestProcessBatch:
 
         # Should return empty list (video failed to save/publish)
         assert len(result) == 0
+
+
+class TestCalculateInitialRisk:
+    """Test initial risk score calculation."""
+
+    def test_calculate_initial_risk_new_channel_low_views(self, video_processor):
+        """Test risk for new channel with low views."""
+        from datetime import datetime, timezone
+
+        from app.models import VideoMetadata
+
+        metadata = VideoMetadata(
+            video_id="test_123",
+            title="Superman Video",
+            channel_id="UC_new",
+            channel_title="New Channel",
+            published_at=datetime.now(timezone.utc),
+            view_count=100,
+            duration_seconds=180,  # 3 min
+            matched_ips=["Justice League"],
+        )
+
+        risk = video_processor.calculate_initial_risk(metadata, channel_risk=0)
+
+        # channel=0, views=0, ips=5, duration=0, age=5
+        # Total = 10
+        assert risk == 10
+
+    def test_calculate_initial_risk_high_channel_viral_video(self, video_processor):
+        """Test risk for high-risk channel with viral video."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import VideoMetadata
+
+        metadata = VideoMetadata(
+            video_id="test_456",
+            title="Batman AI Generated Movie",
+            channel_id="UC_high_risk",
+            channel_title="AI Movie Channel",
+            published_at=datetime.now(timezone.utc) - timedelta(days=3),
+            view_count=2_000_000,
+            duration_seconds=900,  # 15 min
+            matched_ips=["Justice League", "Batman", "Superman"],
+        )
+
+        risk = video_processor.calculate_initial_risk(metadata, channel_risk=80)
+
+        # channel=40, views=15, ips=15, duration=10, age=5
+        # Total = 85
+        assert risk == 85
+
+    def test_calculate_initial_risk_medium_scenario(self, video_processor):
+        """Test risk for medium scenario."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import VideoMetadata
+
+        metadata = VideoMetadata(
+            video_id="test_789",
+            title="Wonder Woman Fan Video",
+            channel_id="UC_medium",
+            channel_title="Fan Channel",
+            published_at=datetime.now(timezone.utc) - timedelta(days=15),
+            view_count=50_000,
+            duration_seconds=400,  # 6.5 min
+            matched_ips=["Justice League", "Wonder Woman"],
+        )
+
+        risk = video_processor.calculate_initial_risk(metadata, channel_risk=40)
+
+        # channel=20, views=5 (50k is >10k but <100k), ips=10, duration=5, age=3
+        # Total = 43
+        assert risk == 43
+
+    def test_calculate_initial_risk_caps_at_100(self, video_processor):
+        """Test risk score caps at 100."""
+        from datetime import datetime, timezone
+
+        from app.models import VideoMetadata
+
+        metadata = VideoMetadata(
+            video_id="test_999",
+            title="Full AI Generated Justice League Movie",
+            channel_id="UC_max_risk",
+            channel_title="AI Studio",
+            published_at=datetime.now(timezone.utc),
+            view_count=10_000_000,
+            duration_seconds=3600,  # 1 hour
+            matched_ips=["Justice League", "Batman", "Superman", "Wonder Woman"],
+        )
+
+        risk = video_processor.calculate_initial_risk(metadata, channel_risk=100)
+
+        # channel=50, views=15, ips=20, duration=10, age=5
+        # Total = 100 (capped)
+        assert risk == 100
+
+    def test_calculate_initial_risk_no_ips(self, video_processor):
+        """Test risk with no IP matches (should be lowest)."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import VideoMetadata
+
+        metadata = VideoMetadata(
+            video_id="test_000",
+            title="Generic Video",
+            channel_id="UC_clean",
+            channel_title="Clean Channel",
+            published_at=datetime.now(timezone.utc) - timedelta(days=60),
+            view_count=500,
+            duration_seconds=120,  # 2 min
+            matched_ips=[],
+        )
+
+        risk = video_processor.calculate_initial_risk(metadata, channel_risk=0)
+
+        # channel=0, views=0, ips=0, duration=0, age=0
+        # Total = 0
+        assert risk == 0
+
+
+class TestCalculateRiskTier:
+    """Test risk tier calculation."""
+
+    def test_risk_tier_critical(self, video_processor):
+        """Test CRITICAL tier (80-100)."""
+        assert video_processor.calculate_risk_tier(100) == "CRITICAL"
+        assert video_processor.calculate_risk_tier(85) == "CRITICAL"
+        assert video_processor.calculate_risk_tier(80) == "CRITICAL"
+
+    def test_risk_tier_high(self, video_processor):
+        """Test HIGH tier (60-79)."""
+        assert video_processor.calculate_risk_tier(79) == "HIGH"
+        assert video_processor.calculate_risk_tier(65) == "HIGH"
+        assert video_processor.calculate_risk_tier(60) == "HIGH"
+
+    def test_risk_tier_medium(self, video_processor):
+        """Test MEDIUM tier (40-59)."""
+        assert video_processor.calculate_risk_tier(59) == "MEDIUM"
+        assert video_processor.calculate_risk_tier(50) == "MEDIUM"
+        assert video_processor.calculate_risk_tier(40) == "MEDIUM"
+
+    def test_risk_tier_low(self, video_processor):
+        """Test LOW tier (20-39)."""
+        assert video_processor.calculate_risk_tier(39) == "LOW"
+        assert video_processor.calculate_risk_tier(25) == "LOW"
+        assert video_processor.calculate_risk_tier(20) == "LOW"
+
+    def test_risk_tier_very_low(self, video_processor):
+        """Test VERY_LOW tier (0-19)."""
+        assert video_processor.calculate_risk_tier(19) == "VERY_LOW"
+        assert video_processor.calculate_risk_tier(10) == "VERY_LOW"
+        assert video_processor.calculate_risk_tier(0) == "VERY_LOW"
+
+
+class TestRiskScoringIntegration:
+    """Test risk scoring in process_batch."""
+
+    def test_process_batch_sets_risk_scores(self, video_processor, sample_video_data):
+        """Test that process_batch sets risk scores on videos."""
+        video_list = [sample_video_data]
+
+        result = video_processor.process_batch(video_list)
+
+        assert len(result) == 1
+        video = result[0]
+
+        # Verify risk fields are set
+        assert video.initial_risk >= 0
+        assert video.initial_risk <= 100
+        assert video.current_risk == video.initial_risk
+        assert video.risk_tier in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "VERY_LOW"]
+
+    def test_process_batch_high_risk_video(self, video_processor):
+        """Test processing a high-risk video."""
+        from datetime import datetime, timezone
+
+        high_risk_video = {
+            "id": "high_risk_123",
+            "snippet": {
+                "title": "FULL AI Generated Superman Batman Movie - Sora AI",
+                "channelId": "UC_ai_studio",
+                "channelTitle": "AI Movie Studio",
+                "publishedAt": datetime.now(timezone.utc).isoformat(),
+                "description": "AI generated Justice League movie",
+                "tags": ["superman", "batman", "ai", "sora"],
+            },
+            "statistics": {"viewCount": "500000", "likeCount": "10000"},
+            "contentDetails": {"duration": "PT15M30S"},  # 15.5 min
+        }
+
+        result = video_processor.process_batch([high_risk_video])
+
+        assert len(result) == 1
+        video = result[0]
+
+        # channel=0, views=10 (500k>100k), ips=5 (1 match), duration=10 (>10min), age=5 (recent)
+        # Total = 30 = LOW tier
+        assert video.initial_risk == 30
+        assert video.risk_tier == "LOW"
+
+        # But this would be upgraded by risk-analyzer-service based on view velocity

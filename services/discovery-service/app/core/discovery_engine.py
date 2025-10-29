@@ -66,7 +66,7 @@ class DiscoveryEngine:
 
     async def discover(self, max_quota: int = 100) -> DiscoveryStats:
         """
-        Execute 4-tier intelligent discovery + video rescanning.
+        Execute 4-tier intelligent discovery.
 
         Args:
             max_quota: Maximum quota units (default: 100)
@@ -80,9 +80,8 @@ class DiscoveryEngine:
         # Calculate tier budgets - PRIORITIZE NEW CHANNEL DISCOVERY
         tier1_quota = int(max_quota * 0.25)  # Fresh: 25% - NEW CHANNELS
         tier2_quota = int(max_quota * 0.10)  # Deep Scan: 10% - existing channels
-        tier3_quota = int(max_quota * 0.10)  # Channel monitoring: 10%
-        tier4_quota = int(max_quota * 0.45)  # Keywords: 45% - NEW CHANNELS (biggest!)
-        rescan_quota = int(max_quota * 0.10)  # Rescan: 10%
+        tier3_quota = int(max_quota * 0.15)  # Channel monitoring: 15% (increased from 10%)
+        tier4_quota = int(max_quota * 0.50)  # Keywords: 50% - NEW CHANNELS (increased from 45%)
 
         tier_stats = {}
 
@@ -123,14 +122,6 @@ class DiscoveryEngine:
         tier_stats["tier4"] = tier4_stats
         logger.info(
             f"Tier 4: {tier4_stats['videos_discovered']} videos, {tier4_stats['quota_used']} quota"
-        )
-
-        # TIER 5: Video Rescanning (detect trending)
-        logger.info(f"TIER 5: Video Rescanning (quota={rescan_quota})")
-        tier5_stats = self._rescan_videos(rescan_quota)
-        tier_stats["tier5"] = tier5_stats
-        logger.info(
-            f"Tier 5: {tier5_stats['videos_rescanned']} videos rescanned, {tier5_stats['trending_count']} trending"
         )
 
         # Aggregate stats
@@ -347,7 +338,7 @@ class DiscoveryEngine:
         }
 
     def _scan_keywords(self, max_quota: int) -> dict:
-        """Tier 3: Priority-based keyword rotation."""
+        """Tier 4: Priority-based keyword rotation."""
         keywords_scanned = 0
         videos_discovered = 0
         quota_used = 0
@@ -430,55 +421,6 @@ class DiscoveryEngine:
             "videos_discovered": videos_discovered,
             "quota_used": quota_used,
             "channels_tracked": len(unique_channels),  # Add channel count
-        }
-
-    def _rescan_videos(self, max_quota: int) -> dict:
-        """Tier 4: Rescan low-view videos to detect trending."""
-        from .video_rescanner import VideoRescanner
-
-        rescanner = VideoRescanner(self.processor.firestore)
-        videos_rescanned = 0
-        trending_count = 0
-        quota_used = 0
-
-        try:
-            # Get videos to rescan (recently discovered, low views)
-            max_videos = max_quota  # 1 quota unit per video
-            video_ids = rescanner.get_videos_to_rescan(
-                max_age_hours=72,  # Last 3 days
-                max_views=10_000,  # Under 10k views
-                limit=max_videos
-            )
-
-            if not video_ids:
-                logger.info("No videos to rescan")
-                return {
-                    "videos_rescanned": 0,
-                    "trending_count": 0,
-                    "quota_used": 0,
-                }
-
-            # Rescan in batches of 50
-            for i in range(0, len(video_ids), 50):
-                batch = video_ids[i:i+50]
-                if quota_used + 1 > max_quota:
-                    break
-                if not self.quota.can_afford("video_details", 1):
-                    break
-
-                results = rescanner.rescan_batch(batch, self.youtube)
-                videos_rescanned += len(results)
-                trending_count += sum(1 for r in results.values() if r.get("is_trending"))
-                quota_used += 1
-                self.quota.record_usage("video_details", 1)
-
-        except Exception as e:
-            logger.error(f"Tier 4 error: {e}")
-
-        return {
-            "videos_rescanned": videos_rescanned,
-            "trending_count": trending_count,
-            "quota_used": quota_used,
         }
 
     def _save_metrics(self, stats: DiscoveryStats, tier_stats: dict):

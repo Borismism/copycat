@@ -239,6 +239,84 @@ class VideoProcessor:
 
         return []
 
+    def calculate_initial_risk(self, metadata: VideoMetadata, channel_risk: int) -> int:
+        """
+        Calculate initial risk score (0-100) for newly discovered video.
+
+        Five-factor risk algorithm:
+        1. Channel risk (0-50 points) - 50% weight
+        2. View count (0-15 points) - popularity indicator
+        3. IP matches (0-20 points) - more matches = higher confidence
+        4. Duration (0-10 points) - longer videos need more review
+        5. Age (0-5 points) - recent videos get priority
+
+        Args:
+            metadata: Video metadata to analyze
+            channel_risk: Channel's current risk score (0-100)
+
+        Returns:
+            Risk score from 0-100
+        """
+        risk = 0
+
+        # Factor 1: Channel reputation (50% weight)
+        # Scale channel risk from 0-100 to 0-50
+        risk += min(channel_risk // 2, 50)
+
+        # Factor 2: View count indicates popularity
+        if metadata.view_count > 1_000_000:
+            risk += 15
+        elif metadata.view_count > 100_000:
+            risk += 10
+        elif metadata.view_count > 10_000:
+            risk += 5
+
+        # Factor 3: More IP matches = higher confidence of infringement
+        risk += min(len(metadata.matched_ips) * 5, 20)
+
+        # Factor 4: Longer videos = more content to review
+        if metadata.duration_seconds > 600:  # >10 min
+            risk += 10
+        elif metadata.duration_seconds > 300:  # >5 min
+            risk += 5
+
+        # Factor 5: Recent videos get priority
+        age_days = (datetime.now(timezone.utc) - metadata.published_at).days
+        if age_days <= 7:
+            risk += 5
+        elif age_days <= 30:
+            risk += 3
+
+        return min(risk, 100)
+
+    def calculate_risk_tier(self, risk_score: int) -> str:
+        """
+        Map risk score to tier for scan scheduling.
+
+        Tiers:
+        - CRITICAL: 80-100 (scan within 6 hours)
+        - HIGH: 60-79 (scan within 24 hours)
+        - MEDIUM: 40-59 (scan within 72 hours)
+        - LOW: 20-39 (scan within 7 days)
+        - VERY_LOW: 0-19 (scan within 30 days)
+
+        Args:
+            risk_score: Risk score from 0-100
+
+        Returns:
+            Risk tier string
+        """
+        if risk_score >= 80:
+            return "CRITICAL"
+        elif risk_score >= 60:
+            return "HIGH"
+        elif risk_score >= 40:
+            return "MEDIUM"
+        elif risk_score >= 20:
+            return "LOW"
+        else:
+            return "VERY_LOW"
+
     def save_and_publish(self, metadata: VideoMetadata) -> bool:
         """
         Atomically save to Firestore and publish to PubSub.
@@ -338,6 +416,19 @@ class VideoProcessor:
                         continue
 
                 metadata.matched_ips = matched_ips
+
+                # Calculate initial risk score
+                # Note: Using channel_risk=0 for simplicity. In production,
+                # would query channel_tracker for actual channel risk.
+                channel_risk = 0
+                metadata.initial_risk = self.calculate_initial_risk(metadata, channel_risk)
+                metadata.current_risk = metadata.initial_risk  # Initially same
+                metadata.risk_tier = self.calculate_risk_tier(metadata.initial_risk)
+
+                logger.debug(
+                    f"Video {metadata.video_id}: risk={metadata.initial_risk}, "
+                    f"tier={metadata.risk_tier}"
+                )
 
                 # Save and publish
                 if self.save_and_publish(metadata):
