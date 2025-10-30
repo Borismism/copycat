@@ -59,6 +59,31 @@ uv run pytest --cov=app --cov-report=term-missing  # With coverage
 ```
 
 ### Running Services Locally
+
+#### Option 1: Docker Compose (Recommended for integration testing)
+```bash
+# Start all services
+docker-compose up -d
+
+# Start specific services
+docker-compose up -d discovery-service risk-analyzer-service
+
+# View logs
+docker-compose logs -f risk-analyzer-service
+
+# Stop all services
+docker-compose down
+```
+
+**Service Ports:**
+- `discovery-service`: http://localhost:8081
+- `risk-analyzer-service`: http://localhost:8082
+- `api-service`: http://localhost:8080
+- `frontend-service`: http://localhost:5173
+- Firestore emulator: http://localhost:8200
+- PubSub emulator: http://localhost:8085
+
+#### Option 2: Individual Service (dev-local.sh)
 The `dev-local.sh` script automatically:
 - Starts Firestore emulator on port 8200
 - Starts PubSub emulator on port 8085
@@ -69,17 +94,26 @@ The `dev-local.sh` script automatically:
 ### Pipeline Flow
 ```
 1. discovery-service
-   ↓ (finds high-risk videos via YouTube API)
-2. risk-scorer-service
-   ↓ (filters to HIGH/MEDIUM risk only - saves 70-90% costs)
-3. chapter-extractor-service
-   ↓ (extracts timestamps with yt-dlp)
-4. frame-extractor-service
-   ↓ (captures frames with OpenCV)
-5. vision-analyzer-service
-   ↓ (detects IP with Gemini 2.0 Flash)
+   ↓ (finds videos via YouTube API, initial 5-factor risk scoring)
+   │ Publishes to: discovered-videos topic
+   ↓
+2. risk-analyzer-service ✨ NEW
+   ↓ (adaptive risk rescoring with view velocity, channel reputation)
+   │ (schedules scans based on risk tier: CRITICAL→6h, HIGH→24h, etc.)
+   │ Publishes to: scan-ready topic
+   ↓
+3. vision-analyzer-service
+   ↓ (analyzes videos with Gemini 2.0 Flash when scan is due)
+   │ (sends results back to risk-analyzer for learning)
    → Firestore + BigQuery
 ```
+
+**Key Changes from Original Architecture:**
+- ✅ **risk-analyzer-service** replaces risk-scorer-service
+- ✅ Intelligent adaptive scoring (learns from Gemini results)
+- ✅ Viral detection (<6 hours for trending videos)
+- ✅ Budget optimization (schedules scans to maximize €240/day)
+- ⏸️ chapter-extractor-service & frame-extractor-service not needed (Gemini 2.0 Flash accepts YouTube URLs directly)
 
 ### Service Communication
 - Services communicate via **PubSub topics** (event-driven)

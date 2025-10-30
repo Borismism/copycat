@@ -100,6 +100,10 @@ class DiscoveryEngine:
             logger.error(f"Tier 1 failed: {e}")
             tier_stats["tier1"] = {"videos_discovered": 0, "quota_used": 0}
 
+        # Rollover unused quota from Tier 1 to Tier 2
+        tier1_unused = tier1_quota - tier_stats["tier1"].get("quota_used", 0)
+        tier2_quota += tier1_unused
+
         # TIER 2: Deep Channel Scan (find ALL matching videos in channel history)
         logger.info(f"TIER 2: Deep Channel Scan (quota={tier2_quota})")
         tier2_stats = self._deep_scan_channels(tier2_quota)
@@ -107,6 +111,10 @@ class DiscoveryEngine:
         logger.info(
             f"Tier 2: {tier2_stats['videos_discovered']} videos, {tier2_stats['quota_used']} quota, {tier2_stats['channels_deep_scanned']} channels"
         )
+
+        # Rollover unused quota from Tier 2 to Tier 3
+        tier2_unused = tier2_quota - tier2_stats.get("quota_used", 0)
+        tier3_quota += tier2_unused
 
         # TIER 3: Channel Tracking (regular monitoring)
         logger.info(f"TIER 3: Channel Tracking (quota={tier3_quota})")
@@ -116,8 +124,12 @@ class DiscoveryEngine:
             f"Tier 3: {tier3_stats['videos_discovered']} videos, {tier3_stats['quota_used']} quota"
         )
 
+        # Rollover ALL unused quota to Tier 4 (keywords - most flexible tier)
+        tier3_unused = tier3_quota - tier3_stats.get("quota_used", 0)
+        tier4_quota += tier3_unused
+
         # TIER 4: Priority-Based Keyword Rotation
-        logger.info(f"TIER 4: Keyword Rotation (quota={tier4_quota})")
+        logger.info(f"TIER 4: Keyword Rotation (quota={tier4_quota}, including {tier1_unused + tier2_unused + tier3_unused} rollover)")
         tier4_stats = self._scan_keywords(tier4_quota)
         tier_stats["tier4"] = tier4_stats
         logger.info(

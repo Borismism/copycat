@@ -28,11 +28,44 @@ async def get_services_status():
         )
     )
 
+    # Check risk-analyzer service
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://risk-analyzer-service:8080/health", timeout=2.0)
+            if response.status_code == 200:
+                services.append(
+                    ServiceHealth(
+                        service_name="risk-analyzer-service",
+                        status=ServiceStatus.HEALTHY,
+                        last_check=datetime.now(),
+                        url="http://risk-analyzer-service:8080",
+                        error=None,
+                    )
+                )
+            else:
+                services.append(
+                    ServiceHealth(
+                        service_name="risk-analyzer-service",
+                        status=ServiceStatus.UNHEALTHY,
+                        last_check=datetime.now(),
+                        url="http://risk-analyzer-service:8080",
+                        error=f"HTTP {response.status_code}",
+                    )
+                )
+    except Exception as e:
+        services.append(
+            ServiceHealth(
+                service_name="risk-analyzer-service",
+                status=ServiceStatus.UNHEALTHY,
+                last_check=datetime.now(),
+                url="http://risk-analyzer-service:8080",
+                error=str(e),
+            )
+        )
+
     # Add placeholder services (not yet implemented)
     for service_name in [
-        "risk-scorer-service",
-        "chapter-extractor-service",
-        "frame-extractor-service",
         "vision-analyzer-service",
     ]:
         services.append(

@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from .config import settings
-from .routers import health
+from .routers import admin, health
+from . import worker
 
 # Configure logging
 logging.basicConfig(
@@ -25,6 +26,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(health.router, tags=["health"])
+app.include_router(admin.router, tags=["admin"])
 
 
 @app.on_event("startup")
@@ -35,11 +37,21 @@ async def startup_event():
     logger.info(f"GCP Project: {settings.gcp_project_id}")
     logger.info(f"Region: {settings.gcp_region}")
 
+    # Start PubSub worker
+    logger.info("Starting PubSub worker...")
+    worker.start_worker()
+    logger.info("PubSub worker started")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
     logger.info(f"Shutting down {settings.service_name}")
+
+    # Stop PubSub worker
+    logger.info("Stopping PubSub worker...")
+    worker.stop_worker()
+    logger.info("PubSub worker stopped")
 
 
 @app.exception_handler(Exception)

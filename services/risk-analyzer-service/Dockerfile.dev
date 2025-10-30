@@ -14,11 +14,10 @@ COPY pyproject.toml ./
 # Install dependencies with increased timeout
 # Note: Using '.' instead of '-r pyproject.toml' ensures proper transitive dependency resolution
 ENV UV_HTTP_TIMEOUT=120
-RUN uv pip install --system --no-cache-dir fastapi uvicorn pydantic-settings google-api-python-client google-auth google-cloud-firestore google-cloud-pubsub google-cloud-secret-manager google-cloud-monitoring httpx python-json-logger pyyaml packaging
+RUN uv pip install --system --no-cache-dir fastapi uvicorn pydantic-settings google-auth google-cloud-firestore google-cloud-pubsub httpx python-json-logger pyyaml
 
 # Copy initial app code (will be overridden by volume mount)
 COPY app/ ./app/
-COPY data/ ./data/
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \

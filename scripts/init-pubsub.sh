@@ -5,13 +5,13 @@ echo "🚀 Initializing PubSub emulator..."
 
 # Wait for emulator to be ready
 echo "⏳ Waiting for PubSub emulator to be ready..."
-until curl -s http://pubsub:8085 > /dev/null 2>&1; do
+until curl -s http://pubsub:8086 > /dev/null 2>&1; do
   sleep 1
 done
 echo "✅ PubSub emulator is ready"
 
 # Use REST API instead of gcloud CLI
-EMULATOR_HOST="pubsub:8085"
+EMULATOR_HOST="pubsub:8086"
 PROJECT_ID="${PUBSUB_PROJECT_ID:-copycat-local}"
 
 echo "📝 Creating topics..."
@@ -26,6 +26,7 @@ create_topic() {
 }
 
 create_topic "discovered-videos"
+create_topic "scan-ready"
 create_topic "risk-scored-videos"
 create_topic "frames-extracted"
 create_topic "vision-analyzed"
@@ -50,7 +51,9 @@ create_subscription() {
     }" > /dev/null 2>&1 && echo "    ✓ Subscription $sub_name created" || echo "    ℹ Subscription $sub_name already exists"
 }
 
+create_subscription "risk-analyzer-video-discovered-sub" "discovered-videos" 60
 create_subscription "risk-scorer-sub" "discovered-videos" 60
+create_subscription "vision-analyzer-scan-ready-sub" "scan-ready" 60
 create_subscription "chapter-extractor-sub" "risk-scored-videos" 60
 create_subscription "frame-extractor-sub" "frames-extracted" 60
 create_subscription "vision-analyzer-sub" "vision-analyzed" 60

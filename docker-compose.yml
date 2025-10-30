@@ -19,16 +19,16 @@ services:
     networks:
       - copycat-network
 
-  # PubSub Emulator - Event messaging
+  # PubSub Emulator - Event messaging (PORT 8086 to avoid gcloud auth conflict)
   pubsub:
     image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
-    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
+    command: gcloud beta emulators pubsub start --host-port=0.0.0.0:8086
     ports:
-      - "8085:8085"
+      - "8086:8086"
     environment:
       - PUBSUB_PROJECT_ID=copycat-local
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8085"]
+      test: ["CMD", "curl", "-f", "http://localhost:8086"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -42,7 +42,7 @@ services:
       pubsub:
         condition: service_healthy
     environment:
-      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - PUBSUB_EMULATOR_HOST=pubsub:8086
       - PUBSUB_PROJECT_ID=copycat-local
     volumes:
       - ./scripts/init-pubsub.sh:/init-pubsub.sh
@@ -80,10 +80,13 @@ services:
     environment:
       - ENVIRONMENT=local
       - GCP_PROJECT_ID=copycat-local
-      - GCP_REGION=us-central1
+      - GCP_REGION=europe-west4
+      - GOOGLE_CLOUD_PROJECT=boris-demo-453408
+      - GOOGLE_APPLICATION_CREDENTIALS=/gcloud/application_default_credentials.json
       - FIRESTORE_EMULATOR_HOST=firestore:8200
       - FIRESTORE_DATABASE_ID=(default)
-      - PUBSUB_EMULATOR_HOST=pubsub:8085
+      - PUBSUB_EMULATOR_HOST=pubsub:8086
+      - MONITORING_PROJECT_ID=boris-demo-453408
       - PUBSUB_TOPIC_DISCOVERED_VIDEOS=discovered-videos
       - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
       - PUBSUB_TIMEOUT_SECONDS=30
@@ -97,6 +100,7 @@ services:
     volumes:
       - ./services/discovery-service/app:/app/app
       - ./services/discovery-service/data:/app/data
+      - ~/.config/gcloud:/gcloud:ro  # Mount gcloud credentials
     networks:
       - copycat-network
     healthcheck:
@@ -161,7 +165,42 @@ services:
       retries: 5
       start_period: 15s
 
-  # Risk Scorer Service - Filters by risk level (PORT 8081)
+  # Risk Analyzer Service - Adaptive risk scoring and scan scheduling (PORT 8082)
+  risk-analyzer-service:
+    build:
+      context: ./services/risk-analyzer-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8082:8080"
+    environment:
+      - ENVIRONMENT=local
+      - GCP_PROJECT_ID=copycat-local
+      - GCP_REGION=us-central1
+      - FIRESTORE_EMULATOR_HOST=firestore:8200
+      - FIRESTORE_DATABASE_ID=(default)
+      - PUBSUB_EMULATOR_HOST=pubsub:8086
+      - PUBSUB_SUBSCRIPTION_VIDEO_DISCOVERED=risk-analyzer-video-discovered-sub
+      - PUBSUB_TOPIC_SCAN_READY=scan-ready
+      - PUBSUB_TIMEOUT_SECONDS=30
+    depends_on:
+      firestore:
+        condition: service_healthy
+      pubsub:
+        condition: service_healthy
+      pubsub-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./services/risk-analyzer-service/app:/app/app
+    networks:
+      - copycat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Risk Scorer Service - Filters by risk level (PORT 8083)
   # Uncomment when ready to implement
   # risk-scorer-service:
   #   build:

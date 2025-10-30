@@ -56,20 +56,35 @@ class QuotaManager:
         self.daily_quota = daily_quota
         self.quota_collection = quota_collection
         self.project_id = project_id or firestore_client.project
-        self.monitoring_client = monitoring_v3.MetricServiceClient()
+
+        # Try to initialize Cloud Monitoring (only works in production with credentials)
+        self.monitoring_client = None
+        try:
+            self.monitoring_client = monitoring_v3.MetricServiceClient()
+            logger.info("Cloud Monitoring client initialized successfully")
+        except Exception as e:
+            logger.info(f"Cloud Monitoring not available (local mode): {str(e)[:100]}")
+
         self._warning_logged = False
         self._operations_since_reload = 0
         self._reload_interval = 10  # Reload from Google every 10 operations
 
-        # Load REAL quota from Google Monitoring API on startup
-        self.used_quota = self.fetch_actual_quota_from_google()
-        if self.used_quota == 0:
-            # Fallback to Firestore if Google API fails
+        # Load quota from Google Monitoring if available, otherwise from Firestore
+        if self.monitoring_client:
+            # Try to load from Google Monitoring API
+            self.used_quota = self.fetch_actual_quota_from_google()
+            if self.used_quota == 0:
+                # Fallback to Firestore if Google API fails
+                self.used_quota = self._load_today_usage()
+            logger.info(
+                f"QuotaManager initialized: {self.used_quota}/{self.daily_quota} units used (from Google)"
+            )
+        else:
+            # No monitoring client, use Firestore only (local mode)
             self.used_quota = self._load_today_usage()
-
-        logger.info(
-            f"QuotaManager initialized: {self.used_quota}/{self.daily_quota} units used (from Google)"
-        )
+            logger.info(
+                f"QuotaManager initialized: {self.used_quota}/{self.daily_quota} units used (from Firestore, local mode)"
+            )
 
     def _get_today_key(self) -> str:
         """
