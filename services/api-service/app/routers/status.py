@@ -29,17 +29,18 @@ async def get_services_status():
     )
 
     # Check risk-analyzer service
+    risk_analyzer_url = "https://risk-analyzer-service-l3hatrwika-ez.a.run.app"
     try:
         import httpx
         async with httpx.AsyncClient() as client:
-            response = await client.get("http://risk-analyzer-service:8080/health", timeout=2.0)
+            response = await client.get(f"{risk_analyzer_url}/health", timeout=2.0)
             if response.status_code == 200:
                 services.append(
                     ServiceHealth(
                         service_name="risk-analyzer-service",
                         status=ServiceStatus.HEALTHY,
                         last_check=datetime.now(),
-                        url="http://risk-analyzer-service:8080",
+                        url=risk_analyzer_url,
                         error=None,
                     )
                 )
@@ -49,7 +50,7 @@ async def get_services_status():
                         service_name="risk-analyzer-service",
                         status=ServiceStatus.UNHEALTHY,
                         last_check=datetime.now(),
-                        url="http://risk-analyzer-service:8080",
+                        url=risk_analyzer_url,
                         error=f"HTTP {response.status_code}",
                     )
                 )
@@ -59,7 +60,7 @@ async def get_services_status():
                 service_name="risk-analyzer-service",
                 status=ServiceStatus.UNHEALTHY,
                 last_check=datetime.now(),
-                url="http://risk-analyzer-service:8080",
+                url=risk_analyzer_url,
                 error=str(e),
             )
         )
