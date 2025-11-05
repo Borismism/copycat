@@ -30,6 +30,7 @@ create_topic "scan-ready"
 create_topic "risk-scored-videos"
 create_topic "frames-extracted"
 create_topic "vision-analyzed"
+create_topic "vision-feedback"
 create_topic "discovered-videos-dlq"
 create_topic "risk-scored-videos-dlq"
 
@@ -52,8 +53,10 @@ create_subscription() {
 }
 
 create_subscription "risk-analyzer-video-discovered-sub" "discovered-videos" 60
+create_subscription "risk-analyzer-vision-feedback-sub" "vision-feedback" 60
 create_subscription "risk-scorer-sub" "discovered-videos" 60
-create_subscription "vision-analyzer-scan-ready-sub" "scan-ready" 60
+create_subscription "vision-analyzer-scan-ready-sub" "scan-ready" 600
+create_subscription "scan-ready-vision-analyzer-sub" "scan-ready" 600
 create_subscription "chapter-extractor-sub" "risk-scored-videos" 60
 create_subscription "frame-extractor-sub" "frames-extracted" 60
 create_subscription "vision-analyzer-sub" "vision-analyzed" 60

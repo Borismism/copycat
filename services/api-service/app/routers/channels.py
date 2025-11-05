@@ -12,7 +12,7 @@ router = APIRouter()
 async def list_channels(
     min_risk: int | None = Query(None, ge=0, le=100, description="Minimum risk score filter"),
     tier: ChannelTier | None = Query(None, description="Filter by channel tier"),
-    sort_by: str = Query("risk_score", description="Field to sort by"),
+    sort_by: str = Query("last_seen_at", description="Field to sort by"),
     sort_desc: bool = Query(True, description="Sort descending"),
     limit: int = Query(20, ge=1, le=100, description="Maximum results per page"),
     offset: int = Query(0, ge=0, description="Number of results to skip"),

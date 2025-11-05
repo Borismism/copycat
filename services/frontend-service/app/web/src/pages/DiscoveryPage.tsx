@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
+import useSWR from 'swr'
+import { Link } from 'react-router-dom'
 import { discoveryAPI } from '../api/discovery'
+import { statusAPI } from '../api/status'
 import type { QuotaStatus, DiscoveryStats } from '../types'
 
 export default function DiscoveryPage() {
@@ -12,6 +15,13 @@ export default function DiscoveryPage() {
   const [currentTier, setCurrentTier] = useState<number>(0)
   const [showResults, setShowResults] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Fetch summary data for dashboard metrics
+  const { data: summary } = useSWR(
+    'summary',
+    () => statusAPI.getSummary(),
+    { refreshInterval: 30000 }
+  )
 
   useEffect(() => {
     loadQuota()
@@ -32,7 +42,7 @@ export default function DiscoveryPage() {
   const triggerDiscovery = async () => {
     try {
       setRunning(true)
-      setProgress('Starting discovery...')
+      setProgress('Initializing discovery...')
       setCurrentTier(0)
       setError(null)
       setShowResults(false) // Hide old results
@@ -56,26 +66,17 @@ export default function DiscoveryPage() {
           state.hasReceivedData = true // We got data!
 
           if (data.status === 'starting') {
-            setProgress(`Starting with ${data.quota} quota...`)
+            setProgress(data.message || `Starting with ${data.quota} quota...`)
             setCurrentTier(1)
-          } else if (data.status === 'tier1') {
-            setProgress(`${data.message} This may take several minutes...`)
-            setCurrentTier(1)
-          } else if (data.status === 'tier2') {
-            setProgress(data.message)
+          } else if (data.status === 'searching') {
+            setProgress(data.message || 'Searching YouTube...')
             setCurrentTier(2)
-          } else if (data.status === 'tier3') {
-            setProgress(`${data.message} Searching YouTube API...`)
-            setCurrentTier(3)
-          } else if (data.status === 'tier4') {
-            setProgress(data.message)
-            setCurrentTier(4)
           } else if (data.status === 'complete') {
             // Mark complete IMMEDIATELY to prevent error logging
             state.isComplete = true
             console.log('[SSE] Complete! Data:', data)
-            setProgress(`✅ Discovery Complete!`)
-            setCurrentTier(4)
+            setProgress(data.message || `✅ Discovery Complete!`)
+            setCurrentTier(3)
             setLastRun(data)
             setShowResults(true)
             console.log('[SSE] Results panel should show now')
@@ -140,114 +141,248 @@ export default function DiscoveryPage() {
     return <div className="text-center py-12">Loading...</div>
   }
 
+  // Calculate efficiency metrics
+  const efficiency = summary && summary.quota_used > 0
+    ? (summary.videos_discovered / summary.quota_used).toFixed(2)
+    : '0.00'
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900">Discovery Service</h2>
-        <p className="text-gray-600">Manage YouTube video discovery</p>
-      </div>
-
-      {/* Control Panel */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold mb-4">Control Panel</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Max Quota Limit
-            </label>
-            <input
-              type="number"
-              value={maxQuota}
-              onChange={(e) => setMaxQuota(Number(e.target.value))}
-              min={100}
-              max={10000}
-              step={100}
-              disabled={running}
-              className="w-48 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-            />
-            <span className="ml-2 text-sm text-gray-500">units</span>
-            {maxQuota < 400 && (
-              <p className="mt-1 text-xs text-yellow-600">
-                💡 Use 400+ quota for keyword searches (current: {maxQuota} too low for new discoveries)
-              </p>
-            )}
-          </div>
-          <button
-            onClick={triggerDiscovery}
-            disabled={running}
-            className={`px-6 py-3 rounded-lg font-medium ${
-              running
-                ? 'bg-gray-400 cursor-not-allowed'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
-            }`}
-          >
-            {running ? 'Running Discovery...' : '▶ Trigger Discovery Run'}
-          </button>
-
-          {/* Progress Display */}
-          {running && (
-            <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <div className="animate-spin h-6 w-6 border-3 border-blue-600 border-t-transparent rounded-full"></div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-blue-900">{progress}</p>
-                  <p className="mt-1 text-xs text-blue-700">Phase {currentTier} of 4</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Error Display */}
-          {error && !running && (
-            <div className="mt-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
-              <div className="flex items-center space-x-3">
-                <span className="text-2xl">❌</span>
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-red-900">Error</p>
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
-                <button
-                  onClick={() => setError(null)}
-                  className="text-red-400 hover:text-red-600"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
+      {/* Page Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Discovery Service Dashboard</h2>
+          <p className="text-gray-600">YouTube video discovery and channel tracking</p>
         </div>
+        <Link
+          to="/"
+          className="px-4 py-2 text-blue-600 hover:text-blue-800 font-medium"
+        >
+          ← Back to Overview
+        </Link>
       </div>
 
-      {/* YouTube API Quota */}
-      {quota && (
+      {/* Key Metrics Cards */}
+      {summary && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Videos Discovered</p>
+                <p className="text-3xl font-bold text-blue-600 mt-2">
+                  {summary.videos_discovered.toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Last 24 hours</p>
+              </div>
+              <span className="text-4xl">🔍</span>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Channels Tracked</p>
+                <p className="text-3xl font-bold text-purple-600 mt-2">
+                  {summary.channels_tracked.toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Active channels</p>
+              </div>
+              <span className="text-4xl">📺</span>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Discovery Efficiency</p>
+                <p className="text-3xl font-bold text-cyan-600 mt-2">
+                  {efficiency}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">videos per quota unit</p>
+              </div>
+              <span className="text-4xl">⚡</span>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Quota Utilization</p>
+                <p className="text-3xl font-bold text-orange-600 mt-2">
+                  {((summary.quota_used / summary.quota_total) * 100).toFixed(0)}%
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {summary.quota_used.toLocaleString()} / {summary.quota_total.toLocaleString()}
+                </p>
+              </div>
+              <span className="text-4xl">📊</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Two-Column Layout: Control Panel + Quota */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Control Panel */}
         <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4">YouTube API Quota</h3>
+          <h3 className="text-lg font-semibold mb-4">Control Panel</h3>
           <div className="space-y-4">
             <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-gray-600">
-                  {quota.used_quota.toLocaleString()} / {quota.daily_quota.toLocaleString()} units
-                </span>
-                <span className="font-medium">{(quota.utilization * 100).toFixed(1)}%</span>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Max Quota Limit
+              </label>
+              <input
+                type="number"
+                value={maxQuota}
+                onChange={(e) => setMaxQuota(Number(e.target.value))}
+                min={100}
+                max={10000}
+                step={100}
+                disabled={running}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              />
+              <span className="ml-2 text-sm text-gray-500">units</span>
+              {maxQuota < 400 && (
+                <p className="mt-1 text-xs text-yellow-600">
+                  💡 Use 400+ quota for keyword searches (current: {maxQuota} too low for new discoveries)
+                </p>
+              )}
+            </div>
+            <button
+              onClick={triggerDiscovery}
+              disabled={running}
+              className={`w-full px-6 py-3 rounded-lg font-medium ${
+                running
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >
+              {running ? 'Running Discovery...' : '▶ Trigger Discovery Run'}
+            </button>
+
+            {/* Progress Display */}
+            {running && (
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <div className="animate-spin h-6 w-6 border-3 border-blue-600 border-t-transparent rounded-full"></div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-blue-900">{progress}</p>
+                    {currentTier > 0 && (
+                      <div className="mt-2 w-full bg-blue-200 rounded-full h-2">
+                        <div
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${(currentTier / 3) * 100}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-3">
-                <div
-                  className={`h-3 rounded-full ${
-                    quota.utilization > 0.9
-                      ? 'bg-red-600'
-                      : quota.utilization > 0.7
-                      ? 'bg-yellow-600'
-                      : 'bg-green-600'
-                  }`}
-                  style={{ width: `${quota.utilization * 100}%` }}
-                />
+            )}
+
+            {/* Error Display */}
+            {error && !running && (
+              <div className="mt-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <span className="text-2xl">❌</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-red-900">Error</p>
+                    <p className="text-sm text-red-700">{error}</p>
+                  </div>
+                  <button
+                    onClick={() => setError(null)}
+                    className="text-red-400 hover:text-red-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* YouTube API Quota */}
+        {quota && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h3 className="text-lg font-semibold mb-4">YouTube API Quota</h3>
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-gray-600">
+                    {quota.used_quota.toLocaleString()} / {quota.daily_quota.toLocaleString()} units
+                  </span>
+                  <span className="font-medium">{(quota.utilization * 100).toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-3">
+                  <div
+                    className={`h-3 rounded-full transition-all ${
+                      quota.utilization > 0.9
+                        ? 'bg-red-600'
+                        : quota.utilization > 0.7
+                        ? 'bg-yellow-600'
+                        : 'bg-blue-600'
+                    }`}
+                    style={{ width: `${quota.utilization * 100}%` }}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 text-sm pt-3">
+                <div>
+                  <span className="text-gray-600">Remaining:</span>
+                  <p className="font-medium text-lg mt-1">{quota.remaining_quota.toLocaleString()}</p>
+                  <p className="text-xs text-gray-500">units available</p>
+                </div>
+                <div>
+                  <span className="text-gray-600">Status:</span>
+                  <p className={`font-medium text-lg mt-1 ${
+                    quota.utilization > 0.9 ? 'text-red-600' :
+                    quota.utilization > 0.7 ? 'text-yellow-600' : 'text-blue-600'
+                  }`}>
+                    {quota.utilization > 0.9 ? 'Critical' :
+                     quota.utilization > 0.7 ? 'High' : 'Normal'}
+                  </p>
+                  <p className="text-xs text-gray-500">usage level</p>
+                </div>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-gray-600">Remaining:</span>
-                <span className="ml-2 font-medium">{quota.remaining_quota.toLocaleString()} units</span>
-              </div>
+          </div>
+        )}
+      </div>
+
+      {/* Last Discovery Run Details */}
+      {summary?.last_run && (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Last Discovery Run</h3>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="text-center p-4 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Completed</p>
+              <p className="text-sm font-medium">
+                {new Date(summary.last_run.timestamp).toLocaleString()}
+              </p>
+            </div>
+            <div className="text-center p-4 bg-gray-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Duration</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {summary.last_run.duration_seconds.toFixed(1)}s
+              </p>
+            </div>
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Videos</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {summary.last_run.videos_discovered}
+              </p>
+            </div>
+            <div className="text-center p-4 bg-purple-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Channels</p>
+              <p className="text-2xl font-bold text-purple-600">
+                {summary.last_run.channels_tracked}
+              </p>
+            </div>
+            <div className="text-center p-4 bg-orange-50 rounded-lg">
+              <p className="text-sm text-gray-600 mb-1">Quota Used</p>
+              <p className="text-2xl font-bold text-orange-600">
+                {summary.last_run.quota_used}
+              </p>
             </div>
           </div>
         </div>

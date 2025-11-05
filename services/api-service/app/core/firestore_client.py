@@ -26,6 +26,11 @@ class FirestoreClient:
             return None
 
         data = doc.to_dict()
+
+        # Map analysis field to vision_analysis for API response
+        if data.get("analysis"):
+            data["vision_analysis"] = data["analysis"]
+
         return VideoMetadata(**data)
 
     async def list_videos(
@@ -69,19 +74,25 @@ class FirestoreClient:
         direction = firestore.Query.DESCENDING if sort_desc else firestore.Query.ASCENDING
         query = query.order_by(sort_by, direction=direction)
 
-        # Get total count (for pagination)
-        # Note: In production, consider caching this or using count aggregations
-        total_docs = query.stream()
-        total = sum(1 for _ in total_docs)
+        # Execute query and filter deleted videos in Python (since Firestore doesn't support "is null OR false")
+        all_docs = list(query.stream())
 
-        # Apply pagination
-        query = query.limit(limit).offset(offset)
+        # Filter out deleted videos
+        non_deleted_docs = [doc for doc in all_docs if not doc.to_dict().get("deleted", False)]
+        total = len(non_deleted_docs)
 
-        # Execute query
-        docs = query.stream()
+        # Apply pagination in Python
+        paginated_docs = non_deleted_docs[offset:offset + limit]
+
+        # Convert to VideoMetadata
         videos = []
-        for doc in docs:
+        for doc in paginated_docs:
             data = doc.to_dict()
+
+            # Map analysis field to vision_analysis for API response
+            if data.get("analysis"):
+                data["vision_analysis"] = data["analysis"]
+
             videos.append(VideoMetadata(**data))
 
         return videos, total
@@ -99,7 +110,7 @@ class FirestoreClient:
         self,
         min_risk: int | None = None,
         tier: ChannelTier | None = None,
-        sort_by: str = "risk_score",
+        sort_by: str = "last_seen_at",
         sort_desc: bool = True,
         limit: int = 20,
         offset: int = 0,
@@ -118,33 +129,67 @@ class FirestoreClient:
         Returns:
             Tuple of (channels list, total count)
         """
-        query = self.channels_collection
+        # Get ALL channels and sort in memory (Firestore emulator has issues with orderBy)
+        all_channels_docs = list(self.channels_collection.stream())
+        total = len(all_channels_docs)
+
+        # Process ALL channels first
+        import logging
+        logger = logging.getLogger(__name__)
+        from datetime import datetime, timezone
+
+        all_channels = []
+        for doc in all_channels_docs:
+            data = doc.to_dict()
+            # Fill in missing fields with defaults
+            channel_data = {
+                "channel_id": data.get("channel_id", doc.id),
+                "channel_title": data.get("channel_title", "Unknown"),
+                "discovered_at": data.get("discovered_at", datetime.now(timezone.utc)),  # Required field!
+                "total_videos_found": data.get("total_videos_found", data.get("video_count", 0)),
+                "confirmed_infringements": data.get("confirmed_infringements", data.get("infringing_videos_count", 0)),
+                "videos_cleared": data.get("videos_cleared", 0),
+                "last_infringement_date": data.get("last_infringement_date"),
+                "infringement_rate": data.get("infringement_rate", 0.0),
+                "risk_score": data.get("risk_score", 0),
+                "tier": data.get("tier", "minimal").lower(),  # Enum expects lowercase!
+                "is_newly_discovered": data.get("is_newly_discovered", True),
+                "last_scanned_at": data.get("last_scanned_at"),
+                "next_scan_at": data.get("next_scan_at"),
+                "last_upload_date": data.get("last_seen_at"),  # Use last_seen_at as upload date
+                "posting_frequency_days": data.get("posting_frequency_days"),
+            }
+            try:
+                all_channels.append(ChannelProfile(**channel_data))
+            except Exception as e:
+                logger.error(f"Failed to create ChannelProfile: {e}, data: {channel_data}")
+                # Skip invalid channels
+                continue
 
         # Apply filters
+        filtered_channels = all_channels
         if min_risk is not None:
-            query = query.where("risk_score", ">=", min_risk)
+            filtered_channels = [ch for ch in filtered_channels if ch.risk_score >= min_risk]
         if tier:
-            query = query.where("tier", "==", tier.value)
+            filtered_channels = [ch for ch in filtered_channels if ch.tier == tier]
 
-        # Sort
-        direction = firestore.Query.DESCENDING if sort_desc else firestore.Query.ASCENDING
-        query = query.order_by(sort_by, direction=direction)
+        # Sort in memory
+        sort_key_map = {
+            "video_count": lambda ch: ch.total_videos_found,
+            "total_videos_found": lambda ch: ch.total_videos_found,
+            "risk_score": lambda ch: ch.risk_score,
+            "discovered_at": lambda ch: ch.discovered_at,
+            "last_seen_at": lambda ch: ch.last_upload_date or datetime.min.replace(tzinfo=timezone.utc),
+        }
 
-        # Get total count
-        total_docs = query.stream()
-        total = sum(1 for _ in total_docs)
+        sort_key_func = sort_key_map.get(sort_by, lambda ch: ch.total_videos_found)
+        filtered_channels.sort(key=sort_key_func, reverse=sort_desc)
 
         # Apply pagination
-        query = query.limit(limit).offset(offset)
+        paginated_channels = filtered_channels[offset:offset+limit]
 
-        # Execute query
-        docs = query.stream()
-        channels = []
-        for doc in docs:
-            data = doc.to_dict()
-            channels.append(ChannelProfile(**data))
-
-        return channels, total
+        logger.info(f"Returning {len(paginated_channels)} channels out of {total} total (filtered: {len(filtered_channels)})")
+        return paginated_channels, total
 
     async def get_channel_stats(self) -> ChannelStats:
         """Get channel tier distribution statistics."""
@@ -202,7 +247,8 @@ class FirestoreClient:
 
     async def get_24h_summary(self) -> dict:
         """Get 24-hour activity summary."""
-        now = datetime.now()
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
         yesterday = now - timedelta(hours=24)
 
         # Count videos discovered in last 24h
@@ -224,15 +270,50 @@ class FirestoreClient:
         # Get last discovery run stats
         last_run = await self.get_last_discovery_run()
 
-        # Note: videos_analyzed, infringements_found
-        # should be queried from BigQuery when vision-analyzer is implemented
+        # Count videos analyzed in last 24h (status = "analyzed")
+        videos_analyzed = 0
+        infringements_found = 0
+
+        try:
+            analyzed_videos = self.videos_collection.where("status", "==", "analyzed").stream()
+
+            for video_doc in analyzed_videos:
+                video_data = video_doc.to_dict()
+
+                # Check if analyzed in last 24h
+                last_analyzed = video_data.get("last_analyzed_at") or video_data.get("updated_at")
+                if last_analyzed:
+                    # Handle both datetime and string timestamps
+                    if isinstance(last_analyzed, str):
+                        from dateutil import parser
+                        last_analyzed = parser.isoparse(last_analyzed)
+
+                    # Ensure timezone-aware comparison
+                    if last_analyzed.tzinfo is None:
+                        last_analyzed = last_analyzed.replace(tzinfo=timezone.utc)
+
+                    if last_analyzed >= yesterday:
+                        videos_analyzed += 1
+
+                        # Check for infringement (from analysis field with multi-IP format)
+                        analysis = video_data.get("analysis", {})
+                        if isinstance(analysis, dict) and analysis.get("ip_results"):
+                            # Multi-IP format: check if any IP has infringement
+                            for ip_result in analysis.get("ip_results", []):
+                                if ip_result.get("contains_infringement"):
+                                    infringements_found += 1
+                                    break
+        except Exception:
+            # If query fails, return 0 (vision analyzer may not be deployed yet)
+            pass
+
         return {
             "videos_discovered": videos_discovered,
             "channels_tracked": channels_tracked,
             "quota_used": quota_used,
             "quota_total": 10000,
-            "videos_analyzed": 0,  # TODO: Query from BigQuery results
-            "infringements_found": 0,  # TODO: Query from BigQuery results
+            "videos_analyzed": videos_analyzed,
+            "infringements_found": infringements_found,
             "period_start": yesterday,
             "period_end": now,
             "last_run": last_run,

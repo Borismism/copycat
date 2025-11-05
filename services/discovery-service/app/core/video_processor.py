@@ -9,7 +9,6 @@ from google.cloud import firestore, pubsub_v1
 
 from ..config import settings
 from ..models import VideoMetadata, VideoStatus
-from .ip_loader import IPTargetManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +31,8 @@ class VideoProcessor:
         self,
         firestore_client: firestore.Client,
         pubsub_publisher: pubsub_v1.PublisherClient,
-        ip_manager: IPTargetManager,
         topic_path: str,
+        channel_tracker: "ChannelTracker | None" = None,
     ):
         """
         Initialize video processor.
@@ -41,13 +40,13 @@ class VideoProcessor:
         Args:
             firestore_client: Firestore client for data persistence
             pubsub_publisher: PubSub client for event publishing
-            ip_manager: IP target manager for content matching
             topic_path: Full PubSub topic path (projects/X/topics/Y)
+            channel_tracker: Optional channel tracker for profile creation
         """
         self.firestore = firestore_client
         self.publisher = pubsub_publisher
-        self.ip_manager = ip_manager
         self.topic_path = topic_path
+        self.channel_tracker = channel_tracker
         self.videos_collection = "videos"
 
         logger.info("VideoProcessor initialized")
@@ -151,55 +150,68 @@ class VideoProcessor:
 
         return hours * 3600 + minutes * 60 + seconds
 
-    def is_duplicate(self, video_id: str, max_age_days: int = 7) -> bool:
+    def update_if_existing(self, metadata: VideoMetadata) -> tuple[bool, bool]:
         """
-        Check if video was processed recently.
+        Update video metadata if it already exists (duplicates = rescans for virality tracking).
 
-        A video is considered duplicate if:
-        1. It exists in Firestore, AND
-        2. It was discovered within last max_age_days
-
-        Rationale: Re-scan old videos to track view growth,
-        but avoid scanning same video multiple times per week.
+        Discovery duplicates are GOOD - they let us:
+        - Track view count growth → Calculate view velocity → Detect viral videos
+        - Update all metadata (title, description, etc.)
+        - Trigger priority rescore for videos going viral
 
         Args:
-            video_id: YouTube video ID
-            max_age_days: Consider duplicate if within this many days
+            metadata: Fresh video metadata from YouTube
 
         Returns:
-            True if duplicate (skip processing), False if new
+            (is_existing, needs_rescore):
+                - is_existing: True if video existed before (duplicate)
+                - needs_rescore: True if views changed significantly (>10%)
         """
-        doc_ref = self.firestore.collection(self.videos_collection).document(video_id)
+        doc_ref = self.firestore.collection(self.videos_collection).document(metadata.video_id)
 
         try:
             doc = doc_ref.get()
 
             if not doc.exists:
-                return False
+                # Brand new video
+                return (False, False)
 
-            video_data = doc.to_dict()
-            discovered_at = video_data.get("discovered_at")
+            # DUPLICATE FOUND - Update it!
+            old_data = doc.to_dict()
+            old_views = old_data.get("view_count", 0)
+            new_views = metadata.view_count
 
-            if not discovered_at:
-                # Old document without timestamp - not a duplicate
-                return False
+            # Calculate view velocity (views gained since last check)
+            views_gained = new_views - old_views
+            time_elapsed_hours = (datetime.now(timezone.utc) - old_data.get("updated_at", datetime.now(timezone.utc))).total_seconds() / 3600
+            view_velocity = int(views_gained / time_elapsed_hours) if time_elapsed_hours > 0 else 0
 
-            days_since_scan = (datetime.now(timezone.utc) - discovered_at).days
+            # Update all fresh metadata
+            doc_ref.update({
+                "view_count": new_views,
+                "like_count": metadata.like_count,
+                "comment_count": metadata.comment_count,
+                "view_velocity": view_velocity,
+                "updated_at": datetime.now(timezone.utc),
+                "last_seen_at": datetime.now(timezone.utc),
+            })
 
-            is_recent = days_since_scan < max_age_days
+            # Needs rescore if views increased significantly (>10% or >1000 views)
+            view_change_pct = (views_gained / old_views * 100) if old_views > 0 else 0
+            needs_rescore = views_gained > 1000 or view_change_pct > 10
 
-            if is_recent:
-                logger.debug(
-                    f"Video {video_id} is duplicate "
-                    f"(scanned {days_since_scan} days ago)"
+            if needs_rescore:
+                logger.info(
+                    f"Video {metadata.video_id}: views {old_views:,} → {new_views:,} "
+                    f"(+{views_gained:,}, velocity={view_velocity}/hr) - RESCORE NEEDED"
                 )
 
-            return is_recent
+            return (True, needs_rescore)
 
         except Exception as e:
-            logger.error(f"Error checking duplicate for {video_id}: {e}")
-            # On error, assume not duplicate (better to process than skip)
-            return False
+            logger.error(f"Error updating existing video {metadata.video_id}: {e}")
+            # On error, treat as new video
+            return (False, False)
 
     def match_ips(self, metadata: VideoMetadata) -> list[str]:
         """
@@ -211,33 +223,99 @@ class VideoProcessor:
         - Video tags
         - Channel name
 
-        Uses IP target keywords and regex patterns from ip_targets.yaml.
+        Loads IP configs from Firestore and matches keywords.
 
         Args:
             metadata: Video metadata to analyze
 
         Returns:
-            List of matched IP names (empty if no matches)
+            List of matched IP IDs (e.g., ["dc-universe"])
         """
-        # Combine all searchable text
-        text_to_check = " ".join(
-            [
-                metadata.title,
-                metadata.description,
-                " ".join(metadata.tags),
-                metadata.channel_title,
-            ]
-        )
+        try:
+            # Load all IP configs from Firestore
+            docs = self.firestore.collection("ip_configs").stream()
 
-        # Match against IP targets
-        matched_targets = self.ip_manager.match_content(text_to_check)
+            matched_ids = []
+            search_text = f"{metadata.title} {metadata.description} {' '.join(metadata.tags)} {metadata.channel_title}".lower()
 
-        if matched_targets:
-            ip_names = [ip.name for ip in matched_targets]
-            logger.info(f"Video {metadata.video_id} matched IPs: {', '.join(ip_names)}")
-            return ip_names
+            for doc in docs:
+                data = doc.to_dict()
+                keywords = data.get("search_keywords", [])
+                characters = data.get("characters", [])
 
-        return []
+                # Match keywords or character names
+                for keyword in keywords:
+                    if keyword.lower() in search_text:
+                        matched_ids.append(doc.id)
+                        break
+
+                # Also check character names if no keyword match
+                if doc.id not in matched_ids:
+                    for char in characters:
+                        if char.lower() in search_text:
+                            matched_ids.append(doc.id)
+                            break
+
+            return matched_ids
+
+        except Exception as e:
+            logger.error(f"Error matching IPs: {e}")
+            return []
+
+    def _get_channel_risk(self, channel_id: str) -> int:
+        """
+        Get channel risk score from Firestore.
+
+        Uses simple heuristic based on channel's infringement history:
+        - No data (new channel): 40 (assume risky until proven otherwise)
+        - Has infringements: High risk (60-80)
+        - Clean history: Lower risk (10-30)
+
+        Args:
+            channel_id: YouTube channel ID
+
+        Returns:
+            Channel risk score (0-100), default 40 for unknown channels
+        """
+        try:
+            doc_ref = self.firestore.collection("channels").document(channel_id)
+            doc = doc_ref.get()
+
+            if not doc.exists:
+                # Unknown channel = assume risky (GUILTY UNTIL PROVEN INNOCENT)
+                return 40
+
+            channel_data = doc.to_dict()
+
+            # Calculate simple risk based on infringement history
+            infringing_count = channel_data.get("infringing_videos_count", 0)
+            total_videos = channel_data.get("total_videos_found", 0)
+            videos_scanned = channel_data.get("videos_scanned", 0)
+
+            # If has confirmed infringements, HIGH RISK
+            if infringing_count > 0:
+                if infringing_count >= 10:
+                    return 80  # Serial infringer
+                elif infringing_count >= 5:
+                    return 70  # Frequent infringer
+                elif infringing_count >= 2:
+                    return 60  # Repeat infringer
+                else:
+                    return 50  # Single infringer (but proven bad)
+
+            # No infringements yet - score by clean scan count
+            if videos_scanned == 0:
+                return 40  # Unknown = assume risky
+            elif videos_scanned <= 2:
+                return 30  # Still suspicious
+            elif videos_scanned <= 5:
+                return 20  # Probably clean
+            else:
+                return 10  # Proven clean
+
+        except Exception as e:
+            logger.error(f"Error getting channel risk for {channel_id}: {e}")
+            return 40  # Default to risky on error
 
     def calculate_initial_risk(self, metadata: VideoMetadata, channel_risk: int) -> int:
         """
@@ -322,8 +400,9 @@ class VideoProcessor:
         Atomically save to Firestore and publish to PubSub.
 
         Operations:
-        1. Save video document to Firestore
-        2. Publish video message to PubSub
+        1. Create/update channel profile
+        2. Save video document to Firestore
+        3. Publish video message to PubSub
 
         Both operations must succeed. If either fails, logs error
         but doesn't raise (allows processing to continue).
@@ -335,6 +414,17 @@ class VideoProcessor:
             True if both operations succeeded, False otherwise
         """
         try:
+            # Create/update channel profile if channel_tracker available
+            if self.channel_tracker:
+                try:
+                    self.channel_tracker.get_or_create_profile(
+                        channel_id=metadata.channel_id,
+                        channel_title=metadata.channel_title
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create channel profile for {metadata.channel_id}: {e}")
+                    # Don't fail the whole operation if channel profile fails
+
             # Save to Firestore
             doc_ref = self.firestore.collection(self.videos_collection).document(
                 metadata.video_id
@@ -402,12 +492,22 @@ class VideoProcessor:
                 # Extract metadata
                 metadata = self.extract_metadata(video_data)
 
-                # Check duplicates
-                if skip_duplicates and self.is_duplicate(metadata.video_id):
-                    skipped_duplicate += 1
+                # Check if existing video (duplicate = good! means we can track virality)
+                is_existing, needs_rescore = self.update_if_existing(metadata)
+
+                if is_existing:
+                    # Already exists - metadata updated, check if needs priority rescore
+                    if needs_rescore:
+                        # Views spiked! Republish to trigger priority rescore
+                        logger.info(f"Video {metadata.video_id} going viral - republishing for rescore")
+                        self.publish_discovered_video(metadata)
+                        processed.append(metadata)
+                    else:
+                        # Metadata updated but no significant change
+                        skipped_duplicate += 1
                     continue
 
-                # Match IPs
+                # NEW VIDEO - Match IPs
                 matched_ips = self.match_ips(metadata)
 
                 if not matched_ips:
@@ -417,10 +517,8 @@ class VideoProcessor:
 
                 metadata.matched_ips = matched_ips
 
-                # Calculate initial risk score
-                # Note: Using channel_risk=0 for simplicity. In production,
-                # would query channel_tracker for actual channel risk.
-                channel_risk = 0
+                # Calculate initial risk score with actual channel risk
+                channel_risk = self._get_channel_risk(metadata.channel_id)
                 metadata.initial_risk = self.calculate_initial_risk(metadata, channel_risk)
                 metadata.current_risk = metadata.initial_risk  # Initially same
                 metadata.risk_tier = self.calculate_risk_tier(metadata.initial_risk)

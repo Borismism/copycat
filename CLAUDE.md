@@ -78,6 +78,7 @@ docker-compose down
 **Service Ports:**
 - `discovery-service`: http://localhost:8081
 - `risk-analyzer-service`: http://localhost:8082
+- `vision-analyzer-service`: http://localhost:8083
 - `api-service`: http://localhost:8080
 - `frontend-service`: http://localhost:5173
 - Firestore emulator: http://localhost:8200
@@ -102,18 +103,22 @@ The `dev-local.sh` script automatically:
    │ (schedules scans based on risk tier: CRITICAL→6h, HIGH→24h, etc.)
    │ Publishes to: scan-ready topic
    ↓
-3. vision-analyzer-service
-   ↓ (analyzes videos with Gemini 2.0 Flash when scan is due)
+3. vision-analyzer-service ✨ NEW - FULLY IMPLEMENTED
+   ↓ (analyzes videos with Gemini 2.5 Flash via Vertex AI)
+   │ (adaptive FPS based on video length + risk tier)
+   │ (budget exhaustion: scans until €240/day fully utilized)
    │ (sends results back to risk-analyzer for learning)
    → Firestore + BigQuery
 ```
 
 **Key Changes from Original Architecture:**
-- ✅ **risk-analyzer-service** replaces risk-scorer-service
+- ✅ **risk-analyzer-service** - Adaptive risk scoring with view velocity
+- ✅ **vision-analyzer-service** - Gemini 2.5 Flash with aggressive cost optimization
 - ✅ Intelligent adaptive scoring (learns from Gemini results)
 - ✅ Viral detection (<6 hours for trending videos)
-- ✅ Budget optimization (schedules scans to maximize €240/day)
-- ⏸️ chapter-extractor-service & frame-extractor-service not needed (Gemini 2.0 Flash accepts YouTube URLs directly)
+- ✅ Budget optimization with length-based FPS (20,000-32,000 videos/day capacity)
+- ✅ No rate limits (Vertex AI Dynamic Shared Quota)
+- ⏸️ chapter-extractor-service & frame-extractor-service not needed (Gemini accepts YouTube URLs directly)
 
 ### Service Communication
 - Services communicate via **PubSub topics** (event-driven)
@@ -698,67 +703,101 @@ To avoid YouTube/API rate limits:
 ## Gemini Video Analysis Strategy
 
 ### **Budget & Capacity**
-- **Daily Budget:** €240 (~$260)
-- **Model:** Gemini 2.0 Flash (via Vertex AI)
+- **Daily Budget:** €240 (~$260 USD)
+- **Model:** Gemini 2.5 Flash (via Vertex AI)
+- **Region:** europe-west4
 - **Input Method:** Direct YouTube URL (no download required!)
-- **Rate Limit:** ~30 requests/min → **~2,880 videos/day capacity**
-- **Actual Throughput:** 2.5 videos/min with processing overhead
+- **Rate Limit:** ✅ **NO HARD LIMITS** - Vertex AI uses Dynamic Shared Quota (DSQ)
+- **Actual Capacity:** 20,000-32,000 videos/day (budget limited, not rate limited)
 
-### **Token Costs (Gemini 2.0 Flash)**
+### **Token Costs (Gemini 2.5 Flash - UPDATED 2025)**
 
 **Video Processing:**
 ```
-Default resolution: 300 tokens/second of video
-- Frames: 258 tokens/frame @ 1 FPS
-- Audio: 32 tokens/second
-
-Low resolution (RECOMMENDED): 100 tokens/second of video
+Low resolution (RECOMMENDED): 100 tokens/second of video @ 1 FPS
 - Frames: 66 tokens/frame @ 1 FPS
 - Audio: 32 tokens/second
 
-Pricing:
-- Input: $0.075 per 1M tokens
-- Output: $0.30 per 1M tokens
+Pricing (Vertex AI - 4-8x MORE EXPENSIVE than originally planned):
+- Input: $0.30 per 1M tokens (was $0.075 in old docs)
+- Output: $2.50 per 1M tokens (was $0.30 in old docs)
+- Audio: $1.00 per 1M tokens
+
+Max output tokens: 65,536 (vs 8,192 for Gemini 2.0)
 ```
 
-**Cost Examples:**
+**Cost Examples (with REAL 2025 pricing):**
 ```
-5-minute video (default resolution):
-- 5 min × 60 sec × 300 tokens = 90,000 tokens input
-- Response ~500 tokens output
-- Cost: $0.0068 + $0.0002 = $0.007 per video
+5-minute video @ 0.5 FPS (MEDIUM risk, length-optimized):
+- Effective duration: 290s (skip 5s intro/outro)
+- Frames: 0.5 fps × 290s × 66 tokens = 9,570 tokens
+- Audio: 290s × 32 tokens/s = 9,280 tokens
+- Input total: 18,850 tokens
+- Output: ~1,000 tokens
+- Cost: (18,850 × $0.30 / 1M) + (1,000 × $2.50 / 1M) = $0.008 per video ✅
 
-5-minute video (LOW RESOLUTION - 3x cheaper):
-- 5 min × 60 sec × 100 tokens = 30,000 tokens input
-- Response ~500 tokens output
-- Cost: $0.0023 + $0.0002 = $0.0025 per video ✅
+5-minute video @ 1.0 FPS (no optimization):
+- Input: 28,420 tokens
+- Cost: ~$0.011 per video
 
-10-minute video (low res):
-- 10 min × 60 sec × 100 tokens = 60,000 tokens
-- Cost: ~$0.005 per video
+10-minute video @ 0.33 FPS (length-optimized):
+- Input: ~22,000 tokens
+- Cost: ~$0.009 per video
 
-Budget capacity at low resolution:
-€240/day ÷ $0.005/video = 48,000 videos/day (theoretical)
-ACTUAL: Limited by rate limits to ~2,880 videos/day
+30-minute video @ 0.2 FPS (aggressive optimization):
+- Input: ~50,000 tokens
+- Cost: ~$0.017 per video
+
+60-minute video @ 0.1 FPS (extreme optimization):
+- Input: ~50,000 tokens
+- Cost: ~$0.017 per video
+
+Budget capacity:
+€240/day ($260) with length-based FPS optimization:
+- Average $0.008-0.011 per video
+- 23,600-32,500 videos/day (BUDGET LIMITED, NO RATE LIMITS!)
 ```
 
-### **Frame Sampling Optimization**
+### **Frame Sampling Optimization (CRITICAL for Cost Control)**
 
-**Using FPS and Offsets:**
+**Implemented in `video_config_calculator.py`:**
+
+**Length-Based FPS Strategy (automatically applied):**
+```
+Video Length       Base FPS    Cost Impact
+0-2 min           1.0         Standard analysis
+2-5 min           0.5         50% token reduction
+5-10 min          0.33        67% token reduction
+10-20 min         0.25        75% token reduction
+20-30 min         0.2         80% token reduction
+30-60 min         0.1         90% token reduction
+60+ min           0.05        95% token reduction (1 frame per 20 seconds!)
+
+Risk Tier Multipliers:
+CRITICAL: 2.0x FPS (highest quality)
+HIGH: 1.5x FPS
+MEDIUM: 1.0x FPS (baseline)
+LOW: 0.75x FPS
+VERY_LOW: 0.5x FPS (minimum viable)
+
+Budget Pressure Adjustment:
+When budget remaining < $50: reduce FPS by 25%
+When budget remaining < $10: reduce FPS by 50%
+```
+
+**Example: 10-minute AI-generated movie**
 ```python
-# Example: 10-minute AI-generated movie
 video_config = {
     "youtube_url": "https://youtube.com/watch?v=VIDEO_ID",
-    "fps": 0.5,  # Sample every 2 seconds (vs 1 FPS default)
+    "fps": 0.33,  # Auto-calculated for 10min video
     "start_offset": "10s",  # Skip intro
-    "end_offset": "590s",  # Skip credits (10 min = 600s)
-    "media_resolution": "low"  # 66 tokens/frame vs 258
+    "end_offset": "590s",  # Skip credits
+    "media_resolution": "low"  # Always use low res (66 tokens/frame)
 }
 
-Savings:
-- Default: 600 frames × 258 tokens = 154,800 tokens
-- Optimized: 290 frames × 66 tokens = 19,140 tokens
-- 87% TOKEN REDUCTION! 💰
+Cost with optimization: $0.009 per video
+Cost without (1.0 FPS): $0.018 per video
+Savings: 50%! 💰
 ```
 
 **Smart Sampling Strategies:**
@@ -788,11 +827,16 @@ Savings:
 
 **Goal:** Scan until €240 budget is 100% utilized
 
+**IMPORTANT:** Gemini 2.5 Flash on Vertex AI uses Dynamic Shared Quota (DSQ):
+- ✅ NO hard rate limits (no RPM cap)
+- ✅ Scales dynamically based on availability
+- ✅ Only limited by budget and token throughput
+- ✅ Can process 20,000-32,000 videos/day (budget limited)
+
 ```python
 DAILY_BUDGET_EUR = 240
 DAILY_BUDGET_USD = 260
-GEMINI_RATE_LIMIT = 2.5  # videos/min
-MAX_VIDEOS_PER_DAY = int(2.5 * 60 * 24 * 0.8)  # 2,880 videos
+# NO RATE LIMIT! Vertex AI DSQ handles scaling automatically
 
 def exhaust_budget():
     """
@@ -891,56 +935,93 @@ def enforce_rate_limit(start_time, videos_scanned):
 
 ```python
 def create_analysis_prompt(characters: list[str]) -> str:
+    # Format character list for display
+    char_bullets = '\n'.join(f"- {char}" for char in characters)
+
     return f"""
-Analyze this YouTube video for AI-generated copyright infringement.
+Analyze this YouTube video for AI-generated copyright infringement of Warner Bros. Entertainment's Justice League characters.
 
-TARGET CHARACTERS: {', '.join(characters)}
+⚠️ CRITICAL: ONLY These Specific Characters Are Relevant ⚠️
 
-DETECTION CRITERIA:
-1. AI-Generated Content:
-   - Look for Sora AI, Runway, Kling, Pika, Luma, or other AI video artifacts
-   - Identify unnatural movements, morphing, inconsistent physics
-   - Check for AI tool watermarks or mentions
+TARGET CHARACTERS (Warner Bros. Justice League ONLY):
+{char_bullets}
 
-2. Character Detection:
-   - Identify which Justice League characters appear
-   - Estimate screen time for each character (seconds)
-   - Note if characters are in costume/recognizable form
+❌ IGNORE ALL OTHER CHARACTERS:
+- Marvel characters (Spider-Man, Iron Man, Hulk, Thor, Captain America, etc.)
+- Other DC characters not in target list (Joker, Harley Quinn, Poison Ivy, etc.)
+- Disney characters (Mickey Mouse, etc.)
+- Video game characters (Mario, Sonic, etc.)
+- Anime characters (Goku, Naruto, etc.)
 
-3. Infringement Assessment:
-   - Is this a full AI-generated movie/episode?
-   - Is it using characters without authorization?
-   - Is it commentary/review (fair use) or original content?
+🚫 FAST REJECTION:
+If the video contains ONLY characters NOT in the target list above → Immediately return:
+{{
+  "contains_infringement": false,
+  "confidence": 100,
+  "infringement_likelihood": 0,
+  "reasoning": "Video features [CHARACTER NAME], which is NOT in our target character list. No analysis needed.",
+  "recommended_action": "ignore"
+}}
 
-4. Video Context:
-   - Title mentions AI tools?
-   - Description credits AI generation?
-   - Monetized content or promotional?
+DETECTION CRITERIA (Only if target characters present):
+
+1. **Character Verification (FIRST STEP)**:
+   - Are ANY of the target characters present?
+   - If NO → Return fast rejection above
+   - If YES → Continue analysis
+
+2. **AI-Generated Content Detection**:
+   - Look for Sora AI, Runway, Kling, Pika, Luma, Minimax, or other AI video tools
+   - Identify AI artifacts: unnatural movements, morphing, inconsistent physics, impossible transitions
+   - Check for AI tool watermarks, mentions in title/description
+   - Check for "AI generated", "AI movie", "Sora created" in title/description
+
+3. **Content Type Classification**:
+   - **AI-generated original content** (HIGH RISK): Full movies, scenes, trailers created with AI
+   - **Real footage** (LOW RISK): Cosplay, fan films with real actors, toys, games
+   - **Fair use** (NO RISK): Reviews, commentary, analysis, educational content
+
+4. **Infringement Assessment**:
+   - Is this AI-generated unauthorized use of Justice League characters?
+   - Is it commercial/monetized?
+   - Is it substantial use (>10 seconds of character screen time)?
 
 RESPOND IN JSON:
 {{
   "contains_infringement": true/false,
   "confidence": 0-100,
   "is_ai_generated": true/false,
-  "ai_tools_detected": ["Sora", "Runway", ...],
+  "ai_tools_detected": ["Sora", "Runway", ...] or [],
   "characters_detected": [
     {{
-      "name": "Superman",
+      "name": "Superman",  # ONLY target list characters!
       "screen_time_seconds": 45,
       "prominence": "high|medium|low",
       "context": "Main character in AI-generated action scene"
     }}
   ],
-  "video_type": "full_ai_movie|ai_clips|trailer|review|other",
+  "video_type": "full_ai_movie|ai_clips|trailer|real_footage|cosplay|review|toys|other",
   "infringement_likelihood": 0-100,
-  "reasoning": "Detailed explanation of determination",
+  "reasoning": "Detailed explanation. If non-Justice-League character, state: 'Video features [CHARACTER] which is not Warner Bros. IP.'",
   "recommended_action": "flag|monitor|ignore"
 }}
 
-IMPORTANT:
-- Focus on UNAUTHORIZED AI-GENERATED content
-- Fair use (reviews, commentary) should be marked as non-infringing
-- Prioritize videos with high view counts and clear character usage
+EXAMPLES:
+
+✅ INFRINGEMENT (flag):
+- "I made a full Batman movie with Sora AI" → AI-generated, unauthorized, commercial
+- "Superman vs Lex Luthor - AI Generated Short Film" → AI-generated Justice League content
+
+⚠️ MONITOR (monitor):
+- "Wonder Woman AI Trailer Concept" → AI-generated but unclear if commercial/substantial use
+
+❌ NOT INFRINGEMENT (ignore):
+- Video featuring Spider-Man → Marvel character, not Warner Bros.
+- Kid wearing Batman costume at party → Real footage, not AI-generated
+- "Batman Movie Review and Analysis" → Fair use commentary
+- Batman action figure video → Toys, not AI-generated content
+
+Remember: We ONLY care about AI-generated infringement of the characters in our target list!
 """
 ```
 

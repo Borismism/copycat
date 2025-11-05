@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.routers import analytics, channels, discovery, status, videos
+from app.routers import analytics, channels, config, config_manager, config_ai_assistant, config_validate_characters, discovery, status, videos, vision_budget, keyword_stats
 
 
 @asynccontextmanager
@@ -42,6 +42,12 @@ app.include_router(discovery.router, prefix="/api/discovery", tags=["Discovery"]
 app.include_router(channels.router, prefix="/api/channels", tags=["Channels"])
 app.include_router(videos.router, prefix="/api/videos", tags=["Videos"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["Analytics"])
+app.include_router(vision_budget.router, prefix="/api/vision", tags=["Vision Analyzer"])
+app.include_router(config.router, prefix="/api", tags=["Configuration"])
+app.include_router(config_manager.router, prefix="/api/config", tags=["Configuration Manager"])
+app.include_router(config_ai_assistant.router, prefix="/api/config/ai", tags=["AI Configuration Assistant"])
+app.include_router(config_validate_characters.router, tags=["AI Configuration Assistant"])
+app.include_router(keyword_stats.router, prefix="/api/keywords", tags=["Keyword Statistics"])
 
 
 @app.get("/")

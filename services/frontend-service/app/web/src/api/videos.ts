@@ -25,4 +25,6 @@ export const videosAPI = {
     return api.get<VideoListResponse>(`/videos${query ? `?${query}` : ''}`)
   },
   getVideo: (videoId: string) => api.get<VideoMetadata>(`/videos/${videoId}`),
+  scanVideo: (videoId: string) => api.post<{ success: boolean; message: string }>(`/videos/${videoId}/scan`, {}),
+  listProcessing: () => api.get<{ processing_videos: VideoMetadata[]; count: number }>(`/videos/processing/list`),
 }

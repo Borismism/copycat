@@ -538,3 +538,64 @@ resource "google_firestore_index" "results_by_action" {
     order      = "DESCENDING"
   }
 }
+
+# ==============================================================================
+# RISK SCORING INDEXES (Added for comprehensive 12-factor risk scoring system)
+# ==============================================================================
+
+# Index 19: Videos by scan_priority (for budget exhaustion mode)
+# Use case: Vision-analyzer queries videos sorted by scan_priority DESC
+# Query: .where("scan_priority", ">=", 30).order_by("scan_priority", DESC)
+# This enables intelligent scanning - highest priority videos scanned first
+resource "google_firestore_index" "videos_by_scan_priority" {
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "scan_priority"
+    order      = "DESCENDING"
+  }
+}
+
+# Index 20: Videos by priority_tier and scan_priority
+# Use case: Filter by tier (CRITICAL, HIGH, MEDIUM) then sort by priority
+# Query: .where("priority_tier", "in", ["CRITICAL", "HIGH"]).order_by("scan_priority", DESC)
+resource "google_firestore_index" "videos_by_tier_and_priority" {
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "priority_tier"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "scan_priority"
+    order      = "DESCENDING"
+  }
+}
+
+# Index 21: Channels with infringements (for viral snowball discovery)
+# Use case: Discovery service Tier 2 - scan ALL videos from infringing channels
+# Query: .where("has_infringements", "==", true)
+#        .where("last_upload_date", ">=", cutoff)
+#        .order_by("total_infringing_views", DESC)
+resource "google_firestore_index" "channels_with_infringements" {
+  database   = google_firestore_database.copycat.name
+  collection = "channels"
+
+  fields {
+    field_path = "has_infringements"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "last_upload_date"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "total_infringing_views"
+    order      = "DESCENDING"
+  }
+}

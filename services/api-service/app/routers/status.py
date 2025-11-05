@@ -29,7 +29,7 @@ async def get_services_status():
     )
 
     # Check risk-analyzer service
-    risk_analyzer_url = "https://risk-analyzer-service-l3hatrwika-ez.a.run.app"
+    risk_analyzer_url = "http://risk-analyzer-service:8080"
     try:
         import httpx
         async with httpx.AsyncClient() as client:
@@ -65,17 +65,40 @@ async def get_services_status():
             )
         )
 
-    # Add placeholder services (not yet implemented)
-    for service_name in [
-        "vision-analyzer-service",
-    ]:
+    # Check vision-analyzer service
+    vision_analyzer_url = "http://vision-analyzer-service:8080"
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{vision_analyzer_url}/health", timeout=2.0)
+            if response.status_code == 200:
+                services.append(
+                    ServiceHealth(
+                        service_name="vision-analyzer-service",
+                        status=ServiceStatus.HEALTHY,
+                        last_check=datetime.now(),
+                        url=vision_analyzer_url,
+                        error=None,
+                    )
+                )
+            else:
+                services.append(
+                    ServiceHealth(
+                        service_name="vision-analyzer-service",
+                        status=ServiceStatus.UNHEALTHY,
+                        last_check=datetime.now(),
+                        url=vision_analyzer_url,
+                        error=f"HTTP {response.status_code}",
+                    )
+                )
+    except Exception as e:
         services.append(
             ServiceHealth(
-                service_name=service_name,
-                status=ServiceStatus.UNKNOWN,
-                last_check=None,
-                url=None,
-                error="Service not yet implemented",
+                service_name="vision-analyzer-service",
+                status=ServiceStatus.UNHEALTHY,
+                last_check=datetime.now(),
+                url=vision_analyzer_url,
+                error=str(e),
             )
         )
 

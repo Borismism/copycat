@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # PubSub
     pubsub_subscription_video_discovered: str = "risk-analyzer-video-discovered-sub"
+    pubsub_subscription_vision_feedback: str = "risk-analyzer-vision-feedback-sub"
     pubsub_timeout_seconds: int = 60
 
     # Risk analysis settings

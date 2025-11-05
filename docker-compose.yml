@@ -6,11 +6,15 @@ services:
   # Firestore Emulator - Document database
   firestore:
     image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
-    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8200
+    command: >
+      sh -c "gcloud beta emulators firestore start
+      --host-port=0.0.0.0:8200"
     ports:
       - "8200:8200"
     environment:
       - FIRESTORE_PROJECT_ID=copycat-local
+    volumes:
+      - firestore-data:/opt/data/firestore
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8200"]
       interval: 5s
@@ -79,16 +83,15 @@ services:
       - "8081:8080"
     environment:
       - ENVIRONMENT=local
-      - GCP_PROJECT_ID=copycat-local
+      - GCP_PROJECT_ID=copycat-local  # For emulator (Firestore/PubSub)
       - GCP_REGION=europe-west4
-      - GOOGLE_CLOUD_PROJECT=boris-demo-453408
+      - YOUTUBE_PROJECT_ID=test-project-boris  # For YouTube API quota tracking
       - GOOGLE_APPLICATION_CREDENTIALS=/gcloud/application_default_credentials.json
       - FIRESTORE_EMULATOR_HOST=firestore:8200
       - FIRESTORE_DATABASE_ID=(default)
       - PUBSUB_EMULATOR_HOST=pubsub:8086
-      - MONITORING_PROJECT_ID=boris-demo-453408
       - PUBSUB_TOPIC_DISCOVERED_VIDEOS=discovered-videos
-      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+      - YOUTUBE_API_KEY=AIzaSyDajWejhv4JW65PUphNrNrZrwg3bGHxAPk
       - PUBSUB_TIMEOUT_SECONDS=30
     depends_on:
       firestore:
@@ -101,6 +104,7 @@ services:
       - ./services/discovery-service/app:/app/app
       - ./services/discovery-service/data:/app/data
       - ~/.config/gcloud:/gcloud:ro  # Mount gcloud credentials
+      - ./shared:/shared:ro  # Mount shared config module
     networks:
       - copycat-network
     healthcheck:
@@ -118,19 +122,29 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - GCP_PROJECT_ID=copycat-local
+      - GCP_PROJECT_ID=copycat-local  # For emulator (Firestore/PubSub)
       - GCP_REGION=europe-west4
+      - GEMINI_PROJECT_ID=copycat-429012  # For Vertex AI/Gemini API
+      - GOOGLE_APPLICATION_CREDENTIALS=/gcloud/application_default_credentials.json
       - ENVIRONMENT=local
       - DISCOVERY_SERVICE_URL=http://discovery-service:8080
       - FIRESTORE_EMULATOR_HOST=firestore:8200
+      - PUBSUB_EMULATOR_HOST=pubsub:8086
+      - PUBSUB_TOPIC_SCAN_READY=scan-ready
       - BIGQUERY_DATASET=copycat_dev
     depends_on:
       firestore:
         condition: service_healthy
+      pubsub:
+        condition: service_healthy
+      pubsub-init:
+        condition: service_completed_successfully
       discovery-service:
         condition: service_healthy
     volumes:
       - ./services/api-service/app:/app/app
+      - ~/.config/gcloud:/gcloud:ro  # Mount gcloud credentials for Gemini
+      - ./shared:/shared:ro  # Mount shared config module
     networks:
       - copycat-network
     healthcheck:
@@ -140,13 +154,13 @@ services:
       retries: 5
       start_period: 10s
 
-  # Frontend Service - React SPA + FastAPI proxy (PORT 5173)
+  # Frontend Service - React SPA with Vite dev server (PORT 5173)
   frontend-service:
     build:
       context: ./services/frontend-service
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     ports:
-      - "5173:8080"
+      - "5173:5173"
     environment:
       - API_SERVICE_URL=http://api-service:8080
       - ENVIRONMENT=local
@@ -154,12 +168,14 @@ services:
       api-service:
         condition: service_healthy
     volumes:
-      - ./services/frontend-service/app/main.py:/app/main.py
-      - ./services/frontend-service/app/web:/web
+      - ./services/frontend-service/app/web/src:/app/src
+      - ./services/frontend-service/app/web/public:/app/public
+      - ./services/frontend-service/app/web/index.html:/app/index.html
+      - ./services/frontend-service/app/web/vite.config.ts:/app/vite.config.ts
     networks:
       - copycat-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -191,6 +207,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./services/risk-analyzer-service/app:/app/app
+      - ./shared:/shared:ro  # Mount shared config module
     networks:
       - copycat-network
     healthcheck:
@@ -275,35 +292,52 @@ services:
   #   networks:
   #     - copycat-network
 
-  # Vision Analyzer Service - Analyzes with Gemini (PORT 8084)
-  # Uncomment when ready to implement
-  # vision-analyzer-service:
-  #   build:
-  #     context: ./services/vision-analyzer-service
-  #     dockerfile: Dockerfile.dev
-  #   ports:
-  #     - "8084:8080"
-  #   environment:
-  #     - ENVIRONMENT=local
-  #     - GCP_PROJECT_ID=copycat-local
-  #     - FIRESTORE_EMULATOR_HOST=firestore:8200
-  #     - PUBSUB_EMULATOR_HOST=pubsub:8085
-  #     - STORAGE_EMULATOR_HOST=http://storage:4443
-  #   depends_on:
-  #     firestore:
-  #       condition: service_healthy
-  #     pubsub:
-  #       condition: service_healthy
-  #     storage:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./services/vision-analyzer-service/app:/app/app
-  #   networks:
-  #     - copycat-network
+  # Vision Analyzer Service - Analyzes with Gemini 2.5 Flash (PORT 8083)
+  vision-analyzer-service:
+    build:
+      context: ./services/vision-analyzer-service
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8083:8080"
+    environment:
+      - ENVIRONMENT=local
+      - GCP_PROJECT_ID=copycat-local  # Emulator project (Firestore/PubSub)
+      - VERTEX_AI_PROJECT_ID=copycat-429012  # Production project (Gemini/Vertex AI)
+      - GCP_REGION=europe-west4
+      - GOOGLE_APPLICATION_CREDENTIALS=/gcloud/application_default_credentials.json
+      - FIRESTORE_EMULATOR_HOST=firestore:8200
+      - FIRESTORE_DATABASE_ID=(default)
+      - PUBSUB_EMULATOR_HOST=pubsub:8086
+      - PUBSUB_SCAN_READY_SUBSCRIPTION=scan-ready-vision-analyzer-sub
+      - PUBSUB_FEEDBACK_TOPIC=vision-feedback
+      - BIGQUERY_DATASET=copycat_dev
+      - GEMINI_MODEL=gemini-2.5-flash
+      - GEMINI_LOCATION=us-central1
+      - DAILY_BUDGET_USD=260
+    depends_on:
+      firestore:
+        condition: service_healthy
+      pubsub:
+        condition: service_healthy
+      pubsub-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./services/vision-analyzer-service/app:/app/app
+      - ~/.config/gcloud:/gcloud:ro  # Mount gcloud credentials for Vertex AI
+      - ./shared:/shared:ro  # Mount shared config module
+    networks:
+      - copycat-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 networks:
   copycat-network:
     driver: bridge
 
 volumes:
+  firestore-data:  # Persistent storage for Firestore emulator
   gcs-data:  # Persistent storage for Cloud Storage emulator

@@ -29,9 +29,13 @@ class PubSubWorker:
             database=settings.firestore_database_id,
         )
         self.subscriber = pubsub_v1.SubscriberClient()
-        self.subscription_path = self.subscriber.subscription_path(
+        self.video_discovered_subscription = self.subscriber.subscription_path(
             settings.gcp_project_id,
             settings.pubsub_subscription_video_discovered,
+        )
+        self.vision_feedback_subscription = self.subscriber.subscription_path(
+            settings.gcp_project_id,
+            settings.pubsub_subscription_vision_feedback,
         )
 
         self.analyzer = RiskAnalyzer(
@@ -40,14 +44,16 @@ class PubSubWorker:
         )
 
         self.running = False
-        self.thread: Optional[threading.Thread] = None
+        self.video_thread: Optional[threading.Thread] = None
+        self.feedback_thread: Optional[threading.Thread] = None
 
         logger.info(f"PubSubWorker initialized")
-        logger.info(f"Subscription: {settings.pubsub_subscription_video_discovered}")
+        logger.info(f"Video discovered subscription: {settings.pubsub_subscription_video_discovered}")
+        logger.info(f"Vision feedback subscription: {settings.pubsub_subscription_vision_feedback}")
 
-    def _message_callback(self, message: pubsub_v1.subscriber.message.Message) -> None:
+    def _video_discovered_callback(self, message: pubsub_v1.subscriber.message.Message) -> None:
         """
-        Process a single PubSub message.
+        Process a video-discovered PubSub message.
 
         Args:
             message: PubSub message
@@ -57,7 +63,7 @@ class PubSubWorker:
             data = json.loads(message.data.decode("utf-8"))
 
             video_id = data.get("video_id", "unknown")
-            logger.info(f"Received message for video {video_id}")
+            logger.info(f"Received video-discovered message for video {video_id}")
 
             # Process the video
             self.analyzer.process_discovered_video(data)
@@ -68,7 +74,35 @@ class PubSubWorker:
             logger.info(f"Successfully processed video {video_id}")
 
         except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
+            logger.error(f"Error processing video-discovered message: {e}", exc_info=True)
+            # Nack the message to retry later
+            message.nack()
+
+    def _vision_feedback_callback(self, message: pubsub_v1.subscriber.message.Message) -> None:
+        """
+        Process a vision-feedback PubSub message.
+
+        Args:
+            message: PubSub message
+        """
+        try:
+            # Decode message data
+            data = json.loads(message.data.decode("utf-8"))
+
+            video_id = data.get("video_id", "unknown")
+            channel_id = data.get("channel_id", "unknown")
+            logger.info(f"Received vision-feedback message for video {video_id} (channel {channel_id})")
+
+            # Process the feedback
+            self.analyzer.process_vision_feedback(data)
+
+            # Acknowledge the message
+            message.ack()
+
+            logger.info(f"Successfully processed vision feedback for {video_id}")
+
+        except Exception as e:
+            logger.error(f"Error processing vision-feedback message: {e}", exc_info=True)
             # Nack the message to retry later
             message.nack()
 
@@ -80,26 +114,34 @@ class PubSubWorker:
 
         self.running = True
 
-        # Start streaming pull in a separate thread
-        self.thread = threading.Thread(target=self._run, daemon=True)
-        self.thread.start()
+        # Start video-discovered subscriber in separate thread
+        self.video_thread = threading.Thread(
+            target=self._run_video_discovered, daemon=True
+        )
+        self.video_thread.start()
 
-        logger.info("PubSubWorker started")
+        # Start vision-feedback subscriber in separate thread
+        self.feedback_thread = threading.Thread(
+            target=self._run_vision_feedback, daemon=True
+        )
+        self.feedback_thread.start()
 
-    def _run(self) -> None:
-        """Run the subscriber in a loop."""
+        logger.info("PubSubWorker started (2 subscriptions)")
+
+    def _run_video_discovered(self) -> None:
+        """Run the video-discovered subscriber in a loop."""
         while self.running:
             try:
-                logger.info(f"Subscribing to {self.subscription_path}")
+                logger.info(f"Subscribing to {self.video_discovered_subscription}")
 
                 # Pull messages with timeout
                 streaming_pull_future = self.subscriber.subscribe(
-                    self.subscription_path,
-                    callback=self._message_callback,
+                    self.video_discovered_subscription,
+                    callback=self._video_discovered_callback,
                     flow_control=pubsub_v1.types.FlowControl(max_messages=10),
                 )
 
-                logger.info("Listening for messages...")
+                logger.info("Listening for video-discovered messages...")
 
                 # Keep the subscriber running
                 while self.running:
@@ -110,9 +152,38 @@ class PubSubWorker:
                 streaming_pull_future.result(timeout=5)
 
             except Exception as e:
-                logger.error(f"Subscriber error: {e}", exc_info=True)
+                logger.error(f"Video-discovered subscriber error: {e}", exc_info=True)
                 if self.running:
-                    logger.info("Restarting subscriber in 5 seconds...")
+                    logger.info("Restarting video-discovered subscriber in 5 seconds...")
+                    time.sleep(5)
+
+    def _run_vision_feedback(self) -> None:
+        """Run the vision-feedback subscriber in a loop."""
+        while self.running:
+            try:
+                logger.info(f"Subscribing to {self.vision_feedback_subscription}")
+
+                # Pull messages with timeout
+                streaming_pull_future = self.subscriber.subscribe(
+                    self.vision_feedback_subscription,
+                    callback=self._vision_feedback_callback,
+                    flow_control=pubsub_v1.types.FlowControl(max_messages=10),
+                )
+
+                logger.info("Listening for vision-feedback messages...")
+
+                # Keep the subscriber running
+                while self.running:
+                    time.sleep(1)
+
+                # Cancel the streaming pull when stopping
+                streaming_pull_future.cancel()
+                streaming_pull_future.result(timeout=5)
+
+            except Exception as e:
+                logger.error(f"Vision-feedback subscriber error: {e}", exc_info=True)
+                if self.running:
+                    logger.info("Restarting vision-feedback subscriber in 5 seconds...")
                     time.sleep(5)
 
     def stop(self) -> None:
@@ -124,8 +195,11 @@ class PubSubWorker:
         logger.info("Stopping PubSubWorker...")
         self.running = False
 
-        if self.thread:
-            self.thread.join(timeout=10)
+        if self.video_thread:
+            self.video_thread.join(timeout=10)
+
+        if self.feedback_thread:
+            self.feedback_thread.join(timeout=10)
 
         logger.info("PubSubWorker stopped")
 

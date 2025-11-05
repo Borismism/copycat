@@ -236,6 +236,130 @@ class YouTubeClient:
             logger.error(f"YouTube API error: {e}")
             raise
 
+    def search_related_videos(
+        self,
+        video_metadata: dict[str, Any],
+        max_results: int = 50,
+    ) -> list[dict[str, Any]]:
+        """
+        Find videos similar to a viral video (VIRAL SNOWBALL STRATEGY - REDESIGNED).
+
+        NOTE: YouTube DEPRECATED relatedToVideoId on Aug 7, 2023!
+        New strategy: Search using video's tags + keywords from title
+
+        Args:
+            video_metadata: Full video metadata dict including tags, title, categoryId
+            max_results: Maximum number of similar videos (default: 50)
+
+        Returns:
+            List of similar video data dictionaries
+
+        Quota Cost:
+            - 100 units for search
+            - 1 unit for video.list
+            - Total: 101 units for up to 50 videos
+
+        Strategy:
+            1. Extract tags from viral video
+            2. Combine top 3 tags into search query
+            3. Search by viewCount (find OTHER viral videos)
+            4. Filter by same category for better relevance
+
+        Example:
+            Viral video: "Pikachu Spiderman AI Wedding" (20M views)
+            Tags: ["Spiderman", "Pikachu", "AI", "shorts"]
+            → Search: "Spiderman Pikachu AI" order=viewCount
+            → Finds: 50 similar viral AI mashup videos
+        """
+        youtube = self._build_youtube_service()
+
+        try:
+            # Extract search terms from video metadata
+            # YouTube API returns: {id, snippet: {title, tags, categoryId, ...}, ...}
+            snippet = video_metadata.get("snippet", video_metadata)  # Fallback to root if already flattened
+
+            tags = snippet.get("tags", [])
+            title = snippet.get("title", "")
+            category_id = snippet.get("categoryId", video_metadata.get("category_id"))
+
+            logger.info(f"Video metadata - tags: {tags[:5] if tags else 'none'}, title: '{title[:60]}...'")
+
+            # Build search query from tags (use top 3)
+            if tags and len(tags) >= 2:
+                # Use first 3 tags (usually most relevant)
+                search_query = " ".join(tags[:3])
+                logger.info(f"Using tags for query: {tags[:3]}")
+            elif tags and len(tags) == 1:
+                # Only 1 tag, add first 2 words from title
+                title_words = title.split()[:2]
+                search_query = f"{tags[0]} {' '.join(title_words)}"
+                logger.info(f"Using 1 tag + title words: {tags[0]} + {title_words}")
+            else:
+                # Fallback: extract meaningful words from title
+                # Remove hashtags, special chars, and short words
+                import re
+                # Remove hashtags and split by |, -, etc
+                clean_title = re.sub(r'#\w+', '', title)  # Remove #hashtags
+                clean_title = re.sub(r'[|]', ' ', clean_title)  # Replace | with space
+                words = [w.strip() for w in clean_title.split() if len(w.strip()) > 2][:5]
+                search_query = " ".join(words) if words else " ".join(title.split()[:3])
+                logger.info(f"Using title words (no tags): {words[:5]}")
+
+            # Clean up query
+            search_query = search_query.strip()
+
+            if not search_query:
+                logger.warning(f"Could not build search query from video metadata: tags={tags}, title={title}")
+                return []
+
+            logger.info(f"Searching similar videos with query: '{search_query}'")
+
+            # Search parameters
+            search_params = {
+                "part": "id,snippet",
+                "q": search_query,
+                "type": "video",
+                "order": "viewCount",  # Find viral videos
+                "maxResults": min(max_results, 50),
+            }
+
+            # Add category filter if available (improves relevance)
+            if category_id:
+                search_params["videoCategoryId"] = category_id
+
+            request = youtube.search().list(**search_params)
+            response = request.execute()
+
+            items = response.get("items", [])
+
+            if not items:
+                logger.info(f"No similar videos found for query: {search_query}")
+                return []
+
+            # Extract video IDs
+            video_ids = []
+            for item in items:
+                vid_id = item.get("id")
+                if isinstance(vid_id, dict):
+                    vid_id = vid_id.get("videoId")
+                if vid_id:
+                    video_ids.append(vid_id)
+
+            # Get full video details
+            if video_ids:
+                videos = self.get_video_details(video_ids)
+                logger.info(
+                    f"Found {len(videos)} similar videos using tags/keywords "
+                    f"(quota: 101 units = {101/len(videos):.1f} units/video)"
+                )
+                return videos
+
+            return []
+
+        except HttpError as e:
+            logger.error(f"YouTube API error searching similar videos: {e}")
+            raise
+
     def search_channel_videos(
         self,
         channel_id: str,

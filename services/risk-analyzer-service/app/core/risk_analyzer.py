@@ -18,7 +18,7 @@ from google.cloud import firestore, pubsub_v1
 
 from .channel_updater import ChannelUpdater
 from .risk_rescorer import RiskRescorer
-from .scan_scheduler import ScanScheduler
+from .scan_priority_calculator import ScanPriorityCalculator
 from .view_velocity_tracker import ViewVelocityTracker
 
 logger = logging.getLogger(__name__)
@@ -52,9 +52,9 @@ class RiskAnalyzer:
 
         # Initialize components
         self.rescorer = RiskRescorer(firestore_client)
-        self.scheduler = ScanScheduler(firestore_client)
         self.channel_updater = ChannelUpdater(firestore_client)
         self.velocity_tracker = ViewVelocityTracker(firestore_client)
+        self.priority_calculator = ScanPriorityCalculator(firestore_client)
 
         logger.info("RiskAnalyzer initialized")
 
@@ -64,34 +64,61 @@ class RiskAnalyzer:
 
         Workflow:
         1. Extract video metadata
-        2. Set initial next_scan_at based on risk tier
-        3. Update Firestore
+        2. Calculate scan priority (Channel 40% + Video 60%)
+        3. Set initial next_scan_at based on priority tier
+        4. Update Firestore
 
         Args:
             message_data: Video metadata from discovery-service
         """
         try:
             video_id = message_data.get("video_id", "")
-            risk_tier = message_data.get("risk_tier", "VERY_LOW")
 
-            logger.info(f"Processing discovered video {video_id} (tier={risk_tier})")
+            logger.info(f"Processing discovered video {video_id}")
 
-            # Calculate next scan time
-            next_scan = self.scheduler.calculate_next_scan_time(risk_tier)
-
-            # Update video with next_scan_at
+            # Get video data from Firestore (discovery-service already saved it)
             doc_ref = self.firestore.collection("videos").document(video_id)
+            doc = doc_ref.get()
+
+            if not doc.exists:
+                logger.error(f"Video {video_id} not found in Firestore")
+                return
+
+            video_data = doc.to_dict()
+
+            # Calculate comprehensive scan priority
+            import asyncio
+            priority_result = asyncio.run(
+                self.priority_calculator.calculate_priority(video_data)
+            )
+
+            scan_priority = priority_result["scan_priority"]
+            priority_tier = priority_result["priority_tier"]
+            channel_risk = priority_result["channel_risk"]
+            video_risk = priority_result["video_risk"]
+
+            logger.info(
+                f"Video {video_id}: scan_priority={scan_priority}, tier={priority_tier}, "
+                f"channel_risk={channel_risk}, video_risk={video_risk}"
+            )
+
+            # Update video with scan priority (no scheduling - just priority queue)
             doc_ref.update({
-                "next_scan_at": next_scan,
+                "scan_priority": scan_priority,
+                "priority_tier": priority_tier,
+                "channel_risk": channel_risk,
+                "video_risk": video_risk,
                 "updated_at": datetime.now(timezone.utc),
             })
 
-            logger.info(f"Video {video_id}: scheduled first scan for {next_scan}")
+            logger.info(
+                f"Video {video_id}: priority={scan_priority}, tier={priority_tier}"
+            )
 
         except Exception as e:
-            logger.error(f"Error processing discovered video: {e}")
+            logger.error(f"Error processing discovered video: {e}", exc_info=True)
 
-    def rescore_video_batch(self, video_ids: list[str]) -> dict:
+    async def rescore_video_batch(self, video_ids: list[str]) -> dict:
         """
         Rescore a batch of videos.
 
@@ -117,27 +144,40 @@ class RiskAnalyzer:
         try:
             logger.info(f"Rescoring batch of {len(video_ids)} videos")
 
-            # Update view velocities (requires YouTube API call)
-            # For now, skip this - would be implemented in production
-            # velocity_results = self.velocity_tracker.update_all_velocities(video_ids, youtube_client)
+            # Rescore each video using scan_priority_calculator (recalculates channel_risk!)
+            for video_id in video_ids:
+                try:
+                    # Get video data
+                    doc_ref = self.firestore.collection("videos").document(video_id)
+                    doc = doc_ref.get()
+                    if not doc.exists:
+                        continue
 
-            # Rescore videos
-            rescore_results = self.rescorer.batch_rescore(video_ids)
-
-            for video_id, result in rescore_results.items():
-                stats["videos_processed"] += 1
-
-                # Get old risk from video
-                doc_ref = self.firestore.collection("videos").document(video_id)
-                doc = doc_ref.get()
-                if doc.exists:
                     video_data = doc.to_dict()
-                    old_risk = video_data.get("current_risk", 0)
-                    new_risk = result["new_risk"]
+                    old_scan_priority = video_data.get("scan_priority", 0)
+                    old_channel_risk = video_data.get("channel_risk", 0)
 
-                    if new_risk > old_risk:
+                    # Recalculate scan priority (also recalculates channel_risk!)
+                    priority_result = await self.priority_calculator.calculate_priority(video_data)
+
+                    new_scan_priority = priority_result["scan_priority"]
+                    new_channel_risk = priority_result["channel_risk"]
+                    new_video_risk = priority_result["video_risk"]
+
+                    # Update video with new scores
+                    doc_ref.update({
+                        "scan_priority": new_scan_priority,
+                        "priority_tier": priority_result["priority_tier"],
+                        "channel_risk": new_channel_risk,
+                        "video_risk": new_video_risk,
+                    })
+
+                    stats["videos_processed"] += 1
+
+                    # Track changes
+                    if new_scan_priority > old_scan_priority:
                         stats["risks_increased"] += 1
-                    elif new_risk < old_risk:
+                    elif new_scan_priority < old_scan_priority:
                         stats["risks_decreased"] += 1
                     else:
                         stats["risks_unchanged"] += 1
@@ -147,8 +187,14 @@ class RiskAnalyzer:
                     if view_velocity > 1000:
                         stats["trending_detected"] += 1
 
-                # Update next scan time based on new tier
-                self.scheduler.update_next_scan_time(video_id, result["new_tier"])
+                    logger.info(
+                        f"Video {video_id}: priority {old_scan_priority}→{new_scan_priority}, "
+                        f"channel_risk {old_channel_risk}→{new_channel_risk}"
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error rescoring video {video_id}: {e}")
+                    continue
 
             logger.info(f"Batch rescore complete: {stats}")
 
@@ -178,8 +224,8 @@ class RiskAnalyzer:
         logger.info("=== Starting continuous risk analysis ===")
 
         try:
-            # Get videos due for scan
-            video_ids = self.scheduler.get_next_scan_batch(batch_size)
+            # Get videos by priority (no scheduling)
+            video_ids = []  # Not implemented - use process_video directly
 
             if not video_ids:
                 logger.info("No videos due for scanning")
@@ -200,6 +246,89 @@ class RiskAnalyzer:
             logger.error(f"Error in continuous analysis: {e}")
             return {"error": str(e)}
 
+    def process_vision_feedback(self, message_data: dict) -> None:
+        """
+        Process vision analysis feedback.
+
+        When vision analyzer finds an infringement, it updates channel data.
+        This triggers recalculation of ALL pending videos from that channel.
+
+        Args:
+            message_data: Feedback from vision-analyzer-service
+        """
+        try:
+            video_id = message_data.get("video_id", "")
+            channel_id = message_data.get("channel_id", "")
+            contains_infringement = message_data.get("contains_infringement", False)
+
+            logger.info(
+                f"Received vision feedback for video {video_id} from channel {channel_id}: "
+                f"infringement={contains_infringement}"
+            )
+
+            if not contains_infringement:
+                logger.info(f"No infringement found, skipping recalculation")
+                return
+
+            # Find all pending/discovered videos from this channel
+            videos_query = (
+                self.firestore.collection("videos")
+                .where("channel_id", "==", channel_id)
+                .where("status", "in", ["discovered", "pending"])
+                .limit(100)
+            )
+
+            videos = list(videos_query.stream())
+            video_ids = [v.id for v in videos]
+
+            if not video_ids:
+                logger.info(f"No pending videos found for channel {channel_id}")
+                return
+
+            logger.info(
+                f"Recalculating priorities for {len(video_ids)} videos from channel {channel_id}"
+            )
+
+            # Recalculate priorities for all videos from this channel
+            import asyncio
+
+            for video_doc in videos:
+                video_data = video_doc.to_dict()
+
+                # Recalculate priority with updated channel data
+                priority_result = asyncio.run(
+                    self.priority_calculator.calculate_priority(video_data)
+                )
+
+                scan_priority = priority_result["scan_priority"]
+                priority_tier = priority_result["priority_tier"]
+                channel_risk = priority_result["channel_risk"]
+                video_risk = priority_result["video_risk"]
+
+                # Update video (now higher priority based on updated channel risk)
+                self.firestore.collection("videos").document(video_doc.id).update(
+                    {
+                        "scan_priority": scan_priority,
+                        "priority_tier": priority_tier,
+                        "channel_risk": channel_risk,
+                        "video_risk": video_risk,
+                        "updated_at": datetime.now(timezone.utc),
+                    }
+                )
+
+                logger.info(
+                    f"Video {video_doc.id}: priority updated from VERY_LOW to {priority_tier} "
+                    f"(priority={scan_priority}, channel_risk={channel_risk})"
+                )
+
+            logger.info(
+                f"Successfully recalculated priorities for {len(video_ids)} videos "
+                f"from channel {channel_id}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error processing vision feedback: {e}", exc_info=True)
+
     def get_system_stats(self) -> dict:
         """
         Get system-wide statistics.
@@ -208,7 +337,7 @@ class RiskAnalyzer:
             Dictionary with system stats
         """
         try:
-            queue_stats = self.scheduler.get_scan_queue_stats()
+            queue_stats = {}  # No scheduler
 
             stats = {
                 "scan_queue": queue_stats,

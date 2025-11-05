@@ -12,15 +12,11 @@ from google.cloud import firestore, pubsub_v1
 from ..config import settings
 from ..core.channel_tracker import ChannelTracker
 from ..core.discovery_engine import DiscoveryEngine
-from ..core.ip_loader import IPTargetManager
-from ..core.keyword_tracker import KeywordTracker
 from ..core.quota_manager import QuotaManager
+from ..core.search_randomizer import SearchRandomizer
 from ..core.video_processor import VideoProcessor
 from ..core.youtube_client import YouTubeClient
-from ..models import (
-    ChannelProfile,
-    DiscoveryStats,
-)
+from ..models import DiscoveryStats
 
 logger = logging.getLogger(__name__)
 
@@ -56,27 +52,24 @@ def get_video_processor(
     pubsub_publisher: pubsub_v1.PublisherClient = Depends(get_pubsub_publisher),
 ) -> VideoProcessor:
     """Get video processor."""
-    ip_manager = IPTargetManager()
     topic_path = pubsub_publisher.topic_path(
         settings.gcp_project_id, settings.pubsub_topic_discovered_videos
     )
+    # Create channel tracker to save channel metadata
+    channel_tracker = ChannelTracker(firestore_client=firestore_client)
+
     return VideoProcessor(
         firestore_client=firestore_client,
         pubsub_publisher=pubsub_publisher,
-        ip_manager=ip_manager,
         topic_path=topic_path,
+        channel_tracker=channel_tracker,
     )
-
-
-def get_channel_tracker(
-    firestore_client: firestore.Client = Depends(get_firestore_client),
-) -> ChannelTracker:
-    """Get channel tracker."""
-    return ChannelTracker(firestore_client=firestore_client)
 
 
 # Cached instances to avoid recreating on every request
 _quota_manager_cache: QuotaManager | None = None
+_search_randomizer_cache: SearchRandomizer | None = None
+
 
 def get_quota_manager(
     firestore_client: firestore.Client = Depends(get_firestore_client),
@@ -84,31 +77,34 @@ def get_quota_manager(
     """Get quota manager (cached singleton)."""
     global _quota_manager_cache
     if _quota_manager_cache is None:
-        _quota_manager_cache = QuotaManager(firestore_client=firestore_client, daily_quota=10_000)
+        _quota_manager_cache = QuotaManager(
+            firestore_client=firestore_client, daily_quota=10_000
+        )
     return _quota_manager_cache
 
 
-def get_keyword_tracker(
+def get_search_randomizer(
     firestore_client: firestore.Client = Depends(get_firestore_client),
-) -> KeywordTracker:
-    """Get keyword tracker."""
-    return KeywordTracker(firestore_client=firestore_client)
+) -> SearchRandomizer:
+    """Get search randomizer (cached singleton)."""
+    global _search_randomizer_cache
+    if _search_randomizer_cache is None:
+        _search_randomizer_cache = SearchRandomizer(firestore_client=firestore_client)
+    return _search_randomizer_cache
 
 
 def get_discovery_engine(
     youtube_client: YouTubeClient = Depends(get_youtube_client),
     video_processor: VideoProcessor = Depends(get_video_processor),
-    channel_tracker: ChannelTracker = Depends(get_channel_tracker),
     quota_manager: QuotaManager = Depends(get_quota_manager),
-    keyword_tracker: KeywordTracker = Depends(get_keyword_tracker),
+    search_randomizer: SearchRandomizer = Depends(get_search_randomizer),
 ) -> DiscoveryEngine:
     """Get discovery engine."""
     return DiscoveryEngine(
         youtube_client=youtube_client,
         video_processor=video_processor,
-        channel_tracker=channel_tracker,
         quota_manager=quota_manager,
-        keyword_tracker=keyword_tracker,
+        search_randomizer=search_randomizer,
     )
 
 
@@ -119,24 +115,28 @@ def get_discovery_engine(
 
 @router.post("/run", response_model=DiscoveryStats)
 async def discover(
-    max_quota: int = 100,
+    max_quota: int = 10_000,  # Full daily quota by default
     engine: DiscoveryEngine = Depends(get_discovery_engine),
 ) -> DiscoveryStats:
     """
-    Run intelligent discovery until quota exhausted.
+    Run smart query-based discovery.
 
-    Automatically uses best strategy:
-    1. Channel tracking (70% quota) - most efficient
-    2. Trending videos (20% quota) - cheap and broad
-    3. Targeted keywords (10% quota) - expensive but precise
+    Strategy:
+    - Deep pagination (5 pages per keyword)
+    - Daily order rotation (date/viewCount/rating/relevance)
+    - Daily time window rotation (last_7d/last_30d/30-90d_ago)
+    - Smart deduplication (skip scanned, update unscanned for virality)
+
+    Capacity:
+    - 10k quota = ~100 queries = ~5,000 videos/day
 
     Args:
-        max_quota: Maximum quota limit for this run (default: 100 units)
+        max_quota: Maximum quota limit for this run (default: 10,000 units)
 
     Returns:
         Discovery statistics
     """
-    logger.info(f"Starting discovery run with max_quota={max_quota}")
+    logger.info(f"Starting smart discovery with max_quota={max_quota}")
 
     try:
         stats = await engine.discover(max_quota=max_quota)
@@ -149,37 +149,26 @@ async def discover(
 
 @router.get("/run/stream")
 async def run_discovery_stream(
-    max_quota: int = 100,
+    max_quota: int = 10_000,
     engine: DiscoveryEngine = Depends(get_discovery_engine),
 ):
     """
     Run discovery with real-time SSE progress updates.
 
-    Streams progress events as discovery runs through each tier.
+    Streams progress events as discovery executes queries.
     """
     async def event_generator():
         try:
             # Send initial status
-            yield f"data: {json.dumps({'status': 'starting', 'quota': max_quota})}\n\n"
+            yield f"data: {json.dumps({'status': 'starting', 'quota': max_quota, 'message': f'Initializing discovery with {max_quota} quota units...'})}\n\n"
             await asyncio.sleep(0.1)
 
-            # Run discovery (this will take a few seconds)
-            # We'll send progress updates by checking intermediate state
-            yield f"data: {json.dumps({'status': 'tier1', 'message': 'Scanning fresh content...'})}\n\n"
+            # Send progress
+            yield f"data: {json.dumps({'status': 'searching', 'message': '🔍 Loading keywords and planning searches (all-time, 4 orderings per keyword)...'})}\n\n"
             await asyncio.sleep(0.1)
 
             # Start discovery
             stats = await engine.discover(max_quota=max_quota)
-
-            # Send tier updates (stats is DiscoveryStats pydantic model, not dict)
-            yield f"data: {json.dumps({'status': 'tier2', 'message': 'Tracking channels...'})}\n\n"
-            await asyncio.sleep(0.1)
-
-            yield f"data: {json.dumps({'status': 'tier3', 'message': 'Keyword rotation...'})}\n\n"
-            await asyncio.sleep(0.1)
-
-            yield f"data: {json.dumps({'status': 'tier4', 'message': 'Rescanning videos...'})}\n\n"
-            await asyncio.sleep(0.1)
 
             # Send final results (convert pydantic model to dict)
             result = {
@@ -188,8 +177,8 @@ async def run_discovery_stream(
                 'videos_with_ip_match': stats.videos_with_ip_match,
                 'videos_skipped_duplicate': stats.videos_skipped_duplicate,
                 'quota_used': stats.quota_used,
-                'channels_tracked': stats.channels_tracked,
                 'duration_seconds': stats.duration_seconds,
+                'message': f'✅ Discovered {stats.videos_discovered} new videos using {stats.quota_used} quota units'
             }
             yield f"data: {json.dumps(result)}\n\n"
 
@@ -208,37 +197,9 @@ async def run_discovery_stream(
     )
 
 
-@router.get("/channels", response_model=list[ChannelProfile])
-async def list_channels(
-    min_risk: int | None = None,
-    limit: int = 50,
-    tracker: ChannelTracker = Depends(get_channel_tracker),
-) -> list[ChannelProfile]:
-    """
-    List tracked channels with optional risk score filter.
-
-    Args:
-        min_risk: Minimum risk score (0-100, optional)
-        limit: Maximum channels to return
-
-    Returns:
-        List of channel profiles ordered by risk score (highest first)
-    """
-    try:
-        channels = tracker.get_all_channels(min_risk=min_risk, limit=limit)
-        return channels
-
-    except Exception as e:
-        logger.error(f"Failed to list channels: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to list channels: {str(e)}"
-        )
-
-
 @router.get("/analytics/discovery")
 async def get_discovery_analytics(
     quota_manager: QuotaManager = Depends(get_quota_manager),
-    channel_tracker: ChannelTracker = Depends(get_channel_tracker),
 ) -> dict:
     """
     Get discovery performance metrics.
@@ -246,7 +207,7 @@ async def get_discovery_analytics(
     Refreshes quota from Firestore to ensure up-to-date values.
 
     Returns:
-        Analytics data including quota usage and channel statistics
+        Analytics data including quota usage
     """
     try:
         # Refresh quota from Firestore to get latest usage
@@ -260,12 +221,8 @@ async def get_discovery_analytics(
             "utilization": quota_manager.get_utilization(),
         }
 
-        # Get channel stats
-        channel_stats = channel_tracker.get_statistics()
-
         return {
             "quota": quota_stats,
-            "channels": channel_stats,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -300,22 +257,115 @@ async def get_quota_status(
     }
 
 
+@router.get("/keywords/performance")
+async def get_keyword_performance(
+    firestore_client: firestore.Client = Depends(get_firestore_client),
+) -> dict:
+    """
+    Get keyword performance statistics with tiers and cooldowns.
+
+    Returns:
+        Keyword performance data grouped by tier
+    """
+    try:
+        # Get all keyword searches, latest per keyword
+        all_searches = (
+            firestore_client.collection("keyword_searches")
+            .order_by("searched_at", direction="DESCENDING")
+            .stream()
+        )
+
+        keyword_stats = {}
+        seen_keywords = set()
+
+        for doc in all_searches:
+            data = doc.to_dict()
+            keyword = data.get("keyword")
+
+            # Only track latest search per keyword
+            if keyword in seen_keywords:
+                continue
+            seen_keywords.add(keyword)
+
+            # Calculate days since last search
+            searched_at = data.get("searched_at")
+            days_since = (datetime.now(timezone.utc) - searched_at).days if searched_at else 999
+
+            # Get cooldown status
+            cooldown_days = data.get("cooldown_days", 1)
+            in_cooldown = days_since < cooldown_days
+            days_until_ready = max(0, cooldown_days - days_since)
+
+            keyword_stats[keyword] = {
+                "keyword": keyword,
+                "tier": data.get("tier", "UNKNOWN"),
+                "efficiency_pct": data.get("efficiency_pct", 0),
+                "new_videos": data.get("new_videos", 0),
+                "total_results": data.get("total_results", 0),
+                "last_searched": searched_at.isoformat() if searched_at else None,
+                "days_since_search": days_since,
+                "cooldown_days": cooldown_days,
+                "in_cooldown": in_cooldown,
+                "days_until_ready": days_until_ready,
+                "search_date": data.get("search_date"),
+            }
+
+        # Group by tier (1, 2, 3 matching config tier system)
+        by_tier = {
+            "1": [],
+            "2": [],
+            "3": [],
+        }
+
+        for stats in keyword_stats.values():
+            tier = stats["tier"]
+            if tier in by_tier:
+                by_tier[tier].append(stats)
+
+        # Sort each tier by efficiency descending
+        for tier in by_tier:
+            by_tier[tier].sort(key=lambda x: x["efficiency_pct"], reverse=True)
+
+        # Calculate tier summaries
+        tier_summary = {}
+        for tier, keywords in by_tier.items():
+            if keywords:
+                tier_summary[tier] = {
+                    "count": len(keywords),
+                    "avg_efficiency": sum(k["efficiency_pct"] for k in keywords) / len(keywords),
+                    "in_cooldown": sum(1 for k in keywords if k["in_cooldown"]),
+                    "ready_to_search": sum(1 for k in keywords if not k["in_cooldown"]),
+                }
+
+        return {
+            "keywords": list(keyword_stats.values()),
+            "by_tier": by_tier,
+            "tier_summary": tier_summary,
+            "total_keywords": len(keyword_stats),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get keyword performance: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get keyword performance: {str(e)}"
+        )
+
+
 @router.get("/analytics/performance")
 async def get_performance_metrics(
     days: int = 7,
     firestore_client: firestore.Client = Depends(get_firestore_client),
     quota_manager: QuotaManager = Depends(get_quota_manager),
-    channel_tracker: ChannelTracker = Depends(get_channel_tracker),
 ) -> dict:
     """
     Get discovery performance metrics over time.
 
     Tracks KPIs to measure discovery efficiency:
     - Videos discovered per API unit spent
-    - Channel tier distribution over time
-    - Infringement rate by channel tier
-    - Quota usage by discovery method
+    - Quota usage trends
     - Deduplication effectiveness
+    - Discovery efficiency over time
 
     Args:
         days: Number of days to look back (default: 7)
@@ -386,9 +436,6 @@ async def get_performance_metrics(
             else 0
         )
 
-        # Get current channel tier distribution
-        channel_stats = channel_tracker.get_statistics()
-
         # Build response
         return {
             "period": {
@@ -414,13 +461,8 @@ async def get_performance_metrics(
             },
             "quota_distribution": {
                 "by_method": quota_by_method,
-                "allocation_strategy": {
-                    "channel_tracking": "70%",
-                    "trending": "20%",
-                    "keywords": "10%",
-                },
+                "allocation_strategy": "Smart query-based with deep pagination",
             },
-            "channel_tiers": channel_stats.get("by_tier", {}),
             "daily_metrics": daily_metrics[:days],  # Limit to requested days
             "current_quota": {
                 "daily_limit": quota_manager.daily_quota,

@@ -129,8 +129,13 @@ resource "google_cloud_run_v2_service" "risk_analyzer_service" {
       }
 
       env {
-        name  = "PUBSUB_SUBSCRIPTION_DISCOVERED_VIDEOS"
-        value = "risk-analyzer-discovered-videos-sub"
+        name  = "PUBSUB_SUBSCRIPTION_VIDEO_DISCOVERED"
+        value = "risk-analyzer-video-discovered-sub"
+      }
+
+      env {
+        name  = "PUBSUB_SUBSCRIPTION_VISION_FEEDBACK"
+        value = "risk-analyzer-vision-feedback-sub"
       }
 
       # Source code hash - triggers redeployment when app code changes
@@ -186,9 +191,31 @@ resource "google_cloud_run_v2_service_iam_member" "public_access" {
 }
 
 # PubSub subscription for discovered videos
-resource "google_pubsub_subscription" "discovered_videos" {
-  name  = "risk-analyzer-discovered-videos-sub"
-  topic = "copycat-video-discovered"
+resource "google_pubsub_subscription" "video_discovered" {
+  name  = "risk-analyzer-video-discovered-sub"
+  topic = "projects/${var.project_id}/topics/copycat-video-discovered"
+
+  ack_deadline_seconds = 600  # 10 minutes
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = "projects/${var.project_id}/topics/copycat-dead-letter"
+    max_delivery_attempts = 5
+  }
+
+  expiration_policy {
+    ttl = ""  # Never expire
+  }
+}
+
+# PubSub subscription for vision feedback
+resource "google_pubsub_subscription" "vision_feedback" {
+  name  = "risk-analyzer-vision-feedback-sub"
+  topic = "projects/${var.project_id}/topics/copycat-vision-feedback"
 
   ack_deadline_seconds = 600  # 10 minutes
 

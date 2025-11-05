@@ -7,13 +7,13 @@ from pydantic import BaseModel, Field
 
 
 class RiskTier(str, Enum):
-    """Risk tiers for scan prioritization."""
+    """Risk tiers for scan prioritization (priority queue, no scheduling)."""
 
-    CRITICAL = "CRITICAL"  # Scan within 6 hours
-    HIGH = "HIGH"  # Scan within 24 hours
-    MEDIUM = "MEDIUM"  # Scan within 72 hours
-    LOW = "LOW"  # Scan within 7 days
-    VERY_LOW = "VERY_LOW"  # Scan within 30 days
+    CRITICAL = "CRITICAL"  # Highest priority (90-100 pts)
+    HIGH = "HIGH"  # High priority (70-89 pts)
+    MEDIUM = "MEDIUM"  # Medium priority (50-69 pts)
+    LOW = "LOW"  # Low priority (30-49 pts)
+    VERY_LOW = "VERY_LOW"  # Lowest priority (0-29 pts)
 
 
 class VideoRiskAnalysis(BaseModel):
@@ -27,7 +27,6 @@ class VideoRiskAnalysis(BaseModel):
     trending_score: int = Field(default=0, ge=0, le=100, description="Viral detection score")
     channel_risk: int = Field(default=0, ge=0, le=100, description="Channel reputation score")
     last_analyzed_at: datetime = Field(..., description="Last analysis timestamp")
-    next_scan_at: datetime = Field(..., description="Next scheduled scan time")
 
 
 class RiskRescoringResult(BaseModel):

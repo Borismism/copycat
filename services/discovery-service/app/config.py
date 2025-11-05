@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     port: int = 8080
 
     # GCP Configuration
-    gcp_project_id: str = "copycat-429012"
+    gcp_project_id: str = "copycat-local"  # Overridden by GCP_PROJECT_ID env var
     gcp_region: str = "europe-west4"
     environment: str = "development"
 
@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     discovery_batch_size: int = 50
 
     # Logging
-    log_level: str = "INFO"
-    debug: bool = False
+    log_level: str = "DEBUG"
+    debug: bool = True
 
 
 # Global settings instance

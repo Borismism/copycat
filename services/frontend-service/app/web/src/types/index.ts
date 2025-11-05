@@ -21,6 +21,36 @@ export enum ChannelTier {
   MINIMAL = 'minimal',
 }
 
+// Vision Analysis types
+export interface CharacterDetection {
+  name: string
+  screen_time_seconds: number
+  prominence: 'primary' | 'secondary' | 'background'
+  timestamps: string[]
+  description: string
+}
+
+export interface IPAnalysisResult {
+  ip_id: string
+  ip_name: string
+  contains_infringement: boolean
+  characters_detected: CharacterDetection[]
+  is_ai_generated: boolean
+  ai_tools_detected: string[]
+  fair_use_applies: boolean
+  fair_use_reasoning: string
+  content_type: string  // Accept any content type from backend
+  infringement_likelihood: number
+  reasoning: string
+  recommended_action: string  // Accept any action from backend
+}
+
+export interface VisionAnalysis {
+  ip_results: IPAnalysisResult[]
+  overall_recommendation: string  // Accept any recommendation from backend
+  overall_notes: string
+}
+
 // Video types
 export interface VideoMetadata {
   video_id: string
@@ -41,6 +71,15 @@ export interface VideoMetadata {
   status: VideoStatus
   discovered_at: string
   updated_at?: string
+  processing_started_at?: string  // When vision analysis started
+  vision_analysis?: VisionAnalysis  // Added: Gemini analysis results
+  last_analyzed_at?: string
+
+  // Risk scoring fields
+  scan_priority?: number  // Final scan priority (0-100)
+  priority_tier?: string  // CRITICAL, HIGH, MEDIUM, LOW, VERY_LOW
+  channel_risk?: number   // Channel risk component (0-100)
+  video_risk?: number     // Video risk component (0-100)
 }
 
 export interface VideoListResponse {
@@ -152,5 +191,39 @@ export interface SystemSummary {
 export interface SystemStatus {
   services: ServiceHealth[]
   summary: SystemSummary
+  timestamp: string
+}
+
+// Keyword Performance types
+export interface KeywordStat {
+  keyword: string
+  tier: '1' | '2' | '3'
+  efficiency_pct: number
+  new_videos: number
+  total_results: number
+  last_searched: string | null
+  days_since_search: number
+  cooldown_days: number
+  in_cooldown: boolean
+  days_until_ready: number
+  search_date: string
+}
+
+export interface TierSummary {
+  count: number
+  avg_efficiency: number
+  in_cooldown: number
+  ready_to_search: number
+}
+
+export interface KeywordPerformance {
+  keywords: KeywordStat[]
+  by_tier: {
+    '1': KeywordStat[]
+    '2': KeywordStat[]
+    '3': KeywordStat[]
+  }
+  tier_summary: Record<string, TierSummary>
+  total_keywords: number
   timestamp: string
 }

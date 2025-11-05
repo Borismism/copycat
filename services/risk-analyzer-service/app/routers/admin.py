@@ -39,8 +39,8 @@ async def rescore_all_videos(
     This endpoint:
     1. Fetches all videos from Firestore
     2. Applies the 6-factor risk scoring algorithm
-    3. Updates risk_tier and current_risk
-    4. Updates next_scan_at based on new tier
+    3. Updates scan_priority and priority_tier
+    4. Videos are immediately available in priority queue
 
     Use this after deploying risk model changes.
     """
@@ -54,7 +54,7 @@ async def rescore_all_videos(
     logger.info(f"Found {len(video_ids)} videos to rescore")
 
     # Rescore batch
-    stats = risk_analyzer.rescore_video_batch(video_ids)
+    stats = await risk_analyzer.rescore_video_batch(video_ids)
 
     logger.info(
         f"Bulk rescore complete: {stats['videos_processed']} videos, "

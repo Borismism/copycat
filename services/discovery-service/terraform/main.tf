@@ -127,7 +127,12 @@ resource "google_cloud_run_v2_service" "discovery_service" {
         value = "copycat-video-discovered"
       }
 
-      # YouTube API key - loaded from Secret Manager
+      # YouTube API configuration
+      env {
+        name  = "YOUTUBE_PROJECT_ID"
+        value = var.project_id  # Same project for YouTube API quota tracking
+      }
+
       env {
         name = "YOUTUBE_API_KEY"
         value_source {
