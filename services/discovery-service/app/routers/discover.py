@@ -160,15 +160,33 @@ async def run_discovery_stream(
     async def event_generator():
         try:
             # Send initial status
-            yield f"data: {json.dumps({'status': 'starting', 'quota': max_quota, 'message': f'Initializing discovery with {max_quota} quota units...'})}\n\n"
+            yield f"data: {json.dumps({'status': 'starting', 'quota': max_quota, 'message': f'🚀 Initializing discovery with {max_quota:,} quota units'})}\n\n"
             await asyncio.sleep(0.1)
 
-            # Send progress
-            yield f"data: {json.dumps({'status': 'searching', 'message': '🔍 Loading keywords and planning searches (all-time, 4 orderings per keyword)...'})}\n\n"
+            # Send planning phase
+            yield f"data: {json.dumps({'status': 'planning', 'message': '📋 Loading keywords and planning search strategy...'})}\n\n"
+            await asyncio.sleep(0.1)
+
+            # Send search strategy details
+            yield f"data: {json.dumps({'status': 'strategy', 'message': '🎯 Strategy: 20 keywords × 5 pages deep with order rotation'})}\n\n"
+            await asyncio.sleep(0.1)
+
+            yield f"data: {json.dumps({'status': 'strategy', 'message': '📅 Time window: all-time (comprehensive coverage)'})}\n\n"
+            await asyncio.sleep(0.1)
+
+            yield f"data: {json.dumps({'status': 'strategy', 'message': '🔀 Order: rotating through date/viewCount/rating/relevance'})}\n\n"
             await asyncio.sleep(0.1)
 
             # Start discovery
+            yield f"data: {json.dumps({'status': 'searching', 'message': '🔍 Executing YouTube API queries...'})}\n\n"
+            await asyncio.sleep(0.1)
+
+            # Run actual discovery
             stats = await engine.discover(max_quota=max_quota)
+
+            # Send processing status
+            yield f"data: {json.dumps({'status': 'processing', 'message': f'⚙️ Processing {stats.videos_discovered} videos for IP matches...'})}\n\n"
+            await asyncio.sleep(0.1)
 
             # Send final results (convert pydantic model to dict)
             result = {
@@ -178,7 +196,7 @@ async def run_discovery_stream(
                 'videos_skipped_duplicate': stats.videos_skipped_duplicate,
                 'quota_used': stats.quota_used,
                 'duration_seconds': stats.duration_seconds,
-                'message': f'✅ Discovered {stats.videos_discovered} new videos using {stats.quota_used} quota units'
+                'message': f'✅ Complete! Found {stats.videos_discovered:,} videos ({stats.videos_with_ip_match:,} with IP match) using {stats.quota_used:,} quota units in {stats.duration_seconds:.1f}s'
             }
             yield f"data: {json.dumps(result)}\n\n"
 
