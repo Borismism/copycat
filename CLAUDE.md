@@ -11,6 +11,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **NEVER EVER run:** `python3 <script>` directly - system Python doesn't have dependencies installed!
 
+## 🔧 Common Issues & Troubleshooting
+
+### Stuck Videos in Vision Analyzer
+If a video gets stuck in "processing" status for too long (>5 minutes):
+
+```bash
+# Reset stuck video to 'failed' status
+FIRESTORE_EMULATOR_HOST=localhost:8200 GCP_PROJECT_ID=copycat-local uv run python3 scripts/reset-stuck-video.py <video_id>
+
+# Example:
+FIRESTORE_EMULATOR_HOST=localhost:8200 GCP_PROJECT_ID=copycat-local uv run python3 scripts/reset-stuck-video.py NmS3KtHfixA
+```
+
+**Why videos get stuck:**
+- Very long videos (>20 min) can timeout with Gemini API
+- Network issues
+- Gemini API rate limiting (rare with Vertex AI)
+
+### Docker Exec Commands Getting Stuck
+**NEVER use:** `docker-compose exec -T <service> python3 << EOF` - This hangs indefinitely!
+
+**Use instead:**
+1. Write script to `/scripts/` directory
+2. Run with `uv run python3` with proper env vars
+
+### Service Health Checks Failing
+If a service shows "(unhealthy)" in `docker-compose ps`:
+- This is usually OK if the service is processing a long video
+- Check logs to see if it's actually working: `docker-compose logs <service> --tail 50`
+- Only restart if truly stuck (no log activity for 5+ minutes)
+
+### Firestore Emulator Issues
+If you get Firestore connection errors:
+```bash
+# Check if emulator is running
+docker-compose ps firestore
+
+# Restart emulator if needed
+docker-compose restart firestore
+
+# For local scripts, always use:
+FIRESTORE_EMULATOR_HOST=localhost:8200 GCP_PROJECT_ID=copycat-local uv run python3 <script>
+```
+
 ## Project Overview
 
 Copycat is an AI-generated content detection system that finds copyright violations at scale. It specifically targets **AI-generated Justice League character content** (Superman, Batman, Wonder Woman, Flash, Aquaman, Cyborg, Green Lantern) created with tools like Sora, Runway, Kling, Pika, etc.
