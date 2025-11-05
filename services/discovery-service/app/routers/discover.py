@@ -186,10 +186,20 @@ async def run_discovery_stream(
 
             # Send final results with full summary (convert pydantic model to dict)
             all_keywords = []
+            query_details = []
             for event in progress_events:
                 if event['type'] == 'plan':
                     all_keywords = event['unique_keywords']
+                    query_details = event.get('query_details', [])
                     break
+
+            # Group queries by keyword to show what orders were used
+            queries_by_keyword = {}
+            for q in query_details:
+                kw = q['keyword']
+                if kw not in queries_by_keyword:
+                    queries_by_keyword[kw] = []
+                queries_by_keyword[kw].append(q['order'])
 
             result = {
                 'status': 'complete',
@@ -200,8 +210,10 @@ async def run_discovery_stream(
                 'duration_seconds': stats.duration_seconds,
                 'keywords_searched': all_keywords,
                 'keywords_count': len(all_keywords),
+                'queries_by_keyword': queries_by_keyword,  # Shows exact keyword+order combinations
+                'all_query_details': query_details,  # Full list of every query
                 'time_window': 'ALL TIME',
-                'orders_used': ['date', 'viewCount', 'rating', 'relevance'],
+                'orders_used': list(set(q['order'] for q in query_details)),  # Actual orders used
                 'message': f'✅ Complete! Found {stats.videos_discovered:,} videos ({stats.videos_with_ip_match:,} with IP match) using {stats.quota_used:,} quota units in {stats.duration_seconds:.1f}s'
             }
             yield f"data: {json.dumps(result)}\n\n"

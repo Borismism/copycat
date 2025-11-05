@@ -94,13 +94,18 @@ class DiscoveryEngine:
         )
         logger.info(f"🔑 Unique keywords in plan: {unique_keywords}")
 
-        # Send plan to callback
+        # Send plan to callback with full query details
+        query_details = [
+            {'keyword': p.query, 'order': p.order.value, 'time_window': 'ALL TIME'}
+            for p in search_plan
+        ]
         if progress_callback:
             await progress_callback({
                 'type': 'plan',
                 'total_queries': len(search_plan),
                 'unique_keywords': unique_keywords,
-                'keywords_count': len(unique_keywords)
+                'keywords_count': len(unique_keywords),
+                'query_details': query_details  # Full list of keyword+order combinations
             })
 
         # NEW STRATEGY: All-time searches, no time window filtering
