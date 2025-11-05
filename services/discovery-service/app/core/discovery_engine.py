@@ -61,7 +61,7 @@ class DiscoveryEngine:
 
         logger.info("DiscoveryEngine initialized (smart query-based)")
 
-    async def discover(self, max_quota: int = 10_000) -> DiscoveryStats:
+    async def discover(self, max_quota: int = 10_000, progress_callback=None) -> DiscoveryStats:
         """
         Execute smart query-based discovery.
 
@@ -73,6 +73,7 @@ class DiscoveryEngine:
 
         Args:
             max_quota: Maximum quota units to use
+            progress_callback: Optional async function to call with progress updates
 
         Returns:
             Discovery statistics
@@ -92,6 +93,15 @@ class DiscoveryEngine:
             f"covering {len(unique_keywords)} unique keywords"
         )
         logger.info(f"🔑 Unique keywords in plan: {unique_keywords}")
+
+        # Send plan to callback
+        if progress_callback:
+            await progress_callback({
+                'type': 'plan',
+                'total_queries': len(search_plan),
+                'unique_keywords': unique_keywords,
+                'keywords_count': len(unique_keywords)
+            })
 
         # NEW STRATEGY: All-time searches, no time window filtering
         logger.info(f"🌍 Using ALL-TIME search (no date filters)")
@@ -122,6 +132,18 @@ class DiscoveryEngine:
 
             logger.info(f"\n{'='*80}")
             logger.info(f"🔍 QUERY {idx}/{len(search_plan)}: '{params.query}' order={params.order.value}")
+
+            # Send query start to callback
+            if progress_callback:
+                await progress_callback({
+                    'type': 'query_start',
+                    'query_index': idx,
+                    'total_queries': len(search_plan),
+                    'keyword': params.query,
+                    'order': params.order.value,
+                    'quota_used': quota_used,
+                    'max_quota': max_quota
+                })
 
             # Check if we've already exhausted quota (check AFTER last call, not before)
             if quota_used >= max_quota:
@@ -204,6 +226,17 @@ class DiscoveryEngine:
                     quota_used += details_batches
                     self.quota.record_usage("video_details", details_batches)
                     logger.info(f"   → Enriched with video details ({details_batches} batch calls)")
+
+                # Send query results to callback
+                if progress_callback:
+                    await progress_callback({
+                        'type': 'query_result',
+                        'keyword': params.query,
+                        'order': params.order.value,
+                        'results_count': len(results),
+                        'quota_used': search_quota,
+                        'total_quota_used': quota_used
+                    })
 
                 # Process results
                 new_count, rediscovered_count, skipped_count = self._process_results(

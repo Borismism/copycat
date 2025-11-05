@@ -161,34 +161,36 @@ async def run_discovery_stream(
         try:
             # Send initial status
             yield f"data: {json.dumps({'status': 'starting', 'quota': max_quota, 'message': f'🚀 Initializing discovery with {max_quota:,} quota units'})}\n\n"
-            await asyncio.sleep(0.1)
 
-            # Send planning phase
-            yield f"data: {json.dumps({'status': 'planning', 'message': '📋 Loading keywords and planning search strategy...'})}\n\n"
-            await asyncio.sleep(0.1)
+            # Progress callback to emit SSE events
+            async def progress_handler(data):
+                if data['type'] == 'plan':
+                    yield f"data: {json.dumps({'status': 'plan', 'message': f\"📋 Plan: {data['keywords_count']} keywords, {data['total_queries']} queries\", 'keywords': data['unique_keywords']})}\n\n"
+                    yield f"data: {json.dumps({'status': 'keywords', 'message': f\"🔑 Keywords: {', '.join(data['unique_keywords'][:5])}{'...' if len(data['unique_keywords']) > 5 else ''}\", 'all_keywords': data['unique_keywords']})}\n\n"
+                elif data['type'] == 'query_start':
+                    yield f"data: {json.dumps({'status': 'query', 'message': f\"🔍 Query {data['query_index']}/{data['total_queries']}: '{data['keyword']}' (order={data['order']}, quota={data['quota_used']:,}/{data['max_quota']:,})\", 'keyword': data['keyword'], 'order': data['order']})}\n\n"
+                elif data['type'] == 'query_result':
+                    yield f"data: {json.dumps({'status': 'result', 'message': f\"✓ '{data['keyword']}' → {data['results_count']} videos (cost: {data['quota_used']:,} units)\", 'keyword': data['keyword'], 'results': data['results_count']})}\n\n"
 
-            # Send search strategy details
-            yield f"data: {json.dumps({'status': 'strategy', 'message': '🎯 Strategy: 20 keywords × 5 pages deep with order rotation'})}\n\n"
-            await asyncio.sleep(0.1)
+            # Run actual discovery with progress callback
+            progress_events = []
+            async def collect_progress(data):
+                progress_events.append(data)
 
-            yield f"data: {json.dumps({'status': 'strategy', 'message': '📅 Time window: all-time (comprehensive coverage)'})}\n\n"
-            await asyncio.sleep(0.1)
+            stats = await engine.discover(max_quota=max_quota, progress_callback=collect_progress)
 
-            yield f"data: {json.dumps({'status': 'strategy', 'message': '🔀 Order: rotating through date/viewCount/rating/relevance'})}\n\n"
-            await asyncio.sleep(0.1)
+            # Emit collected progress events
+            for event_data in progress_events:
+                async for event in progress_handler(event_data):
+                    yield event
 
-            # Start discovery
-            yield f"data: {json.dumps({'status': 'searching', 'message': '🔍 Executing YouTube API queries...'})}\n\n"
-            await asyncio.sleep(0.1)
+            # Send final results with full summary (convert pydantic model to dict)
+            all_keywords = []
+            for event in progress_events:
+                if event['type'] == 'plan':
+                    all_keywords = event['unique_keywords']
+                    break
 
-            # Run actual discovery
-            stats = await engine.discover(max_quota=max_quota)
-
-            # Send processing status
-            yield f"data: {json.dumps({'status': 'processing', 'message': f'⚙️ Processing {stats.videos_discovered} videos for IP matches...'})}\n\n"
-            await asyncio.sleep(0.1)
-
-            # Send final results (convert pydantic model to dict)
             result = {
                 'status': 'complete',
                 'videos_discovered': stats.videos_discovered,
@@ -196,6 +198,10 @@ async def run_discovery_stream(
                 'videos_skipped_duplicate': stats.videos_skipped_duplicate,
                 'quota_used': stats.quota_used,
                 'duration_seconds': stats.duration_seconds,
+                'keywords_searched': all_keywords,
+                'keywords_count': len(all_keywords),
+                'time_window': 'ALL TIME',
+                'orders_used': ['date', 'viewCount', 'rating', 'relevance'],
                 'message': f'✅ Complete! Found {stats.videos_discovered:,} videos ({stats.videos_with_ip_match:,} with IP match) using {stats.quota_used:,} quota units in {stats.duration_seconds:.1f}s'
             }
             yield f"data: {json.dumps(result)}\n\n"
