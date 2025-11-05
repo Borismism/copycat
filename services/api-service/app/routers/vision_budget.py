@@ -393,29 +393,28 @@ async def get_vision_analytics():
         for video in videos:
             data = video.to_dict()
             status = data.get("status", "pending")
-            vision_analysis = data.get("vision_analysis")
-            analyzed_at = data.get("analyzed_at")
+            analysis = data.get("analysis")  # ✅ FIXED: was "vision_analysis"
+            analyzed_at = data.get("last_analyzed_at") or data.get("analyzed_at")  # ✅ FIXED: check both fields
 
             # Count by status
             if status == "analyzed":
-                if vision_analysis:
+                if analysis:
                     total_analyzed += 1
                     status_counts["success"] += 1
 
                     # Check if infringement
-                    if isinstance(vision_analysis, dict):
-                        full_analysis = vision_analysis.get("full_analysis", vision_analysis)
-                        if full_analysis.get("contains_infringement") is True:
+                    if isinstance(analysis, dict):
+                        if analysis.get("contains_infringement") is True:
                             infringements_found += 1
 
-                    # Track processing time
+                    # Track cost from actual data
+                    video_cost = analysis.get("cost_usd", 0.008) if isinstance(analysis, dict) else 0.008
+                    total_cost += video_cost
+
+                    # Track processing time (TODO: add this to analysis data)
                     proc_time = data.get("processing_time_seconds")
                     if proc_time and isinstance(proc_time, (int, float)):
                         processing_times.append(proc_time)
-
-                    # Estimate cost (avg $0.008 per video from CLAUDE.md)
-                    video_cost = 0.008
-                    total_cost += video_cost
 
                     # Check if analyzed in last 24h
                     if analyzed_at:
@@ -433,7 +432,7 @@ async def get_vision_analytics():
                 else:
                     status_counts["error"] += 1
                     total_errors += 1
-            elif status == "error":
+            elif status == "failed" or status == "error":  # ✅ FIXED: both "failed" and "error" are errors
                 status_counts["error"] += 1
                 total_errors += 1
 
