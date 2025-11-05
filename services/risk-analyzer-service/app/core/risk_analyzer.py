@@ -266,9 +266,8 @@ class RiskAnalyzer:
                 f"infringement={contains_infringement}"
             )
 
-            if not contains_infringement:
-                logger.info(f"No infringement found, skipping recalculation")
-                return
+            # Always recalculate - both positive (infringement) and negative (clean) feedback matters!
+            # Clean videos should LOWER channel risk over time
 
             # Find all pending/discovered videos from this channel
             videos_query = (
@@ -317,8 +316,8 @@ class RiskAnalyzer:
                 )
 
                 logger.info(
-                    f"Video {video_doc.id}: priority updated from VERY_LOW to {priority_tier} "
-                    f"(priority={scan_priority}, channel_risk={channel_risk})"
+                    f"Video {video_doc.id}: priority recalculated to {priority_tier} "
+                    f"(priority={scan_priority}, channel_risk={channel_risk}, infringement_feedback={contains_infringement})"
                 )
 
             logger.info(

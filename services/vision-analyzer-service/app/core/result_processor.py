@@ -108,11 +108,14 @@ class ResultProcessor:
             else:
                 logger.warning(f"No channel_id available for video {result.video_id}, skipping feedback")
 
-            # 3. Update channel tracking if infringement found
+            # 3. ALWAYS update channel stats (both clean and infringing videos)
+            await self._update_channel_scan_stats(channel_id, has_infringement, view_count)
+
+            # 4. Update infringement tracking if violation found
             if has_infringement:
                 await self._update_channel_infringement_tracking(result, channel_id, view_count)
 
-                # 4. Alert on high confidence infringements
+                # 5. Alert on high confidence infringements
                 if max_likelihood >= 80:
                     await self._alert_high_confidence_infringement(result)
 
@@ -293,6 +296,41 @@ class ResultProcessor:
             logger.error(f"Failed to publish feedback: {e}")
             # Don't raise - feedback is important but not critical
             # Log error but continue
+
+    async def _update_channel_scan_stats(self, channel_id: str, has_infringement: bool, view_count: int):
+        """
+        Update channel scan statistics (ALWAYS called, regardless of infringement).
+
+        This increments videos_scanned counter which is used by the risk calculator
+        to LOWER risk for channels with many clean scans.
+
+        Args:
+            channel_id: Channel ID
+            has_infringement: Whether this video had an infringement
+            view_count: Current view count of the video
+        """
+        try:
+            if not channel_id:
+                logger.warning(f"No channel_id provided, cannot update channel stats")
+                return
+
+            # Update channel document
+            channel_ref = self.firestore.collection("channels").document(channel_id)
+
+            # Always increment videos_scanned
+            # Also track clean vs infringing
+            channel_ref.update({
+                "videos_scanned": firestore.Increment(1),
+                "last_scanned_at": firestore.SERVER_TIMESTAMP,
+            })
+
+            logger.info(
+                f"Updated channel {channel_id} scan stats: +1 scanned, infringement={has_infringement}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to update channel scan stats: {e}")
+            # Don't raise - stats tracking is important but not critical
 
     async def _update_channel_infringement_tracking(self, result: VisionAnalysisResult, channel_id: str, view_count: int):
         """
