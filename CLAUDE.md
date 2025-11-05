@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⚠️ CRITICAL: NEVER USE RAW PYTHON3 COMMANDS ⚠️
+
+**ALWAYS use one of these methods for Python code:**
+1. `uv run python3 <script>` - For local scripts
+2. `docker-compose exec <service> python <script>` - For service scripts
+3. `FIRESTORE_EMULATOR_HOST=localhost:8200 GCP_PROJECT_ID=copycat-local PYTHONPATH=. uv run python3 <script>` - For scripts needing Firestore
+
+**NEVER EVER run:** `python3 <script>` directly - system Python doesn't have dependencies installed!
+
 ## Project Overview
 
 Copycat is an AI-generated content detection system that finds copyright violations at scale. It specifically targets **AI-generated Justice League character content** (Superman, Batman, Wonder Woman, Flash, Aquaman, Cyborg, Green Lantern) created with tools like Sora, Runway, Kling, Pika, etc.
