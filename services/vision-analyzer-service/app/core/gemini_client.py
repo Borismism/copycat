@@ -136,7 +136,7 @@ class GeminiClient:
         fps: float,
         start_offset: int,
         end_offset: int,
-        max_retries: int = 3,
+        max_retries: int = 5,
     ) -> Any:
         """
         Call Gemini API with exponential backoff retry for rate limits.
@@ -147,7 +147,7 @@ class GeminiClient:
             fps: Frames per second
             start_offset: Start offset in seconds
             end_offset: End offset in seconds
-            max_retries: Maximum retry attempts
+            max_retries: Maximum retry attempts (default: 5)
 
         Returns:
             Gemini API response
@@ -155,6 +155,9 @@ class GeminiClient:
         Raises:
             Exception: If all retries fail
         """
+        # Exponential backoff delays: 1s, 8s, 16s, 32s, 64s
+        backoff_delays = [1, 8, 16, 32, 64]
+
         for attempt in range(max_retries):
             try:
                 # Use Part.from_uri for YouTube video (official SDK pattern)
@@ -182,13 +185,13 @@ class GeminiClient:
             except google_exceptions.ResourceExhausted as e:
                 # Rate limit hit
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    wait_time = backoff_delays[attempt]
                     logger.warning(
                         f"Rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
                     )
                     time.sleep(wait_time)
                 else:
-                    logger.error("Rate limit exceeded after all retries")
+                    logger.error(f"Rate limit exceeded after {max_retries} retries")
                     raise
 
             except Exception as e:
