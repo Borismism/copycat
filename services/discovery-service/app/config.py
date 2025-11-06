@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     firestore_database_id: str = "copycat"  # Matches terraform default
 
     # PubSub
-    pubsub_topic_discovered_videos: str = "discovered-videos"
+    pubsub_topic_discovered_videos: str = "copycat-video-discovered"
     pubsub_timeout_seconds: int = 60
 
     # YouTube API
