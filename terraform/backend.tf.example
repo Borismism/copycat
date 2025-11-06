@@ -1,0 +1,41 @@
+# ==============================================================================
+# TERRAFORM BACKEND CONFIGURATION
+# ==============================================================================
+# This file shows how to configure the GCS backend for Terraform state.
+# The actual backend config is in provider.tf with placeholder values.
+#
+# Initialize with:
+#   terraform init \
+#     -backend-config="bucket=YOUR_PROJECT_ID-terraform-state" \
+#     -backend-config="prefix=copycat/global-infra"
+# ==============================================================================
+
+# The backend configuration in provider.tf looks like this:
+#
+# terraform {
+#   backend "gcs" {
+#     # Configured via -backend-config flags
+#     # bucket = "PROJECT_ID-terraform-state"
+#     # prefix = "copycat/global-infra"
+#   }
+# }
+
+# ==============================================================================
+# CREATING THE STATE BUCKET
+# ==============================================================================
+#
+# Before running terraform init, create the state bucket:
+#
+# 1. Set your project:
+#    export PROJECT_ID="your-gcp-project-id"
+#
+# 2. Create the bucket:
+#    gsutil mb -p $PROJECT_ID -l europe-west4 gs://${PROJECT_ID}-terraform-state
+#
+# 3. Enable versioning:
+#    gsutil versioning set on gs://${PROJECT_ID}-terraform-state
+#
+# 4. Enable uniform bucket-level access:
+#    gsutil uniformbucketlevelaccess set on gs://${PROJECT_ID}-terraform-state
+#
+# ==============================================================================

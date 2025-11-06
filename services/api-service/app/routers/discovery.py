@@ -2,12 +2,13 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import httpx
+from google.cloud import firestore
 
 from app.core.discovery_client import discovery_client
-from app.core.firestore_client import firestore_client
+from app.core.firestore_client import firestore_client, FirestoreClient, get_firestore_client
 from app.core.config import settings
 from app.models import DiscoveryAnalytics, DiscoveryStats, DiscoveryTriggerRequest, QuotaStatus
 
@@ -128,3 +129,74 @@ async def get_discovery_analytics():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
+
+
+@router.post("/discover/channel/{channel_id}/scan")
+async def scan_channel(channel_id: str, max_videos: int = 50):
+    """
+    Scan a specific channel for videos.
+    Proxies request to discovery service.
+    """
+    from datetime import datetime, timezone
+
+    # NOTE: No scan_history tracking for discovery operations
+    # Only per-video scans are tracked in scan_history
+
+    try:
+        url = f"{settings.discovery_service_url}/discover/channel/{channel_id}/scan?max_videos={max_videos}"
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url)
+            response.raise_for_status()
+            result = response.json()
+
+        return result
+
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to scan channel: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to scan channel: {str(e)}")
+
+
+@router.get("/history")
+async def get_discovery_history(
+    limit: int = 20,
+    offset: int = 0,
+    firestore_client: FirestoreClient = Depends(get_firestore_client),
+):
+    """
+    Get discovery run history with pagination.
+    
+    Args:
+        limit: Number of runs to return
+        offset: Number of runs to skip
+    
+    Returns:
+        List of discovery runs
+    """
+    try:
+        # Fetch from Firestore
+        query = firestore_client.db.collection("discovery_history").order_by(
+            "started_at", direction=firestore.Query.DESCENDING
+        )
+        
+        all_runs = list(query.stream())
+        total = len(all_runs)
+        
+        # Apply pagination
+        paginated_runs = all_runs[offset:offset+limit]
+        
+        runs = []
+        for doc in paginated_runs:
+            data = doc.to_dict()
+            runs.append(data)
+        
+        return {
+            "runs": runs,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch discovery history: {str(e)}")

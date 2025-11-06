@@ -19,9 +19,8 @@ resource "google_secret_manager_secret" "youtube_api_key" {
   }
 
   labels = {
-    environment = var.environment
-    service     = "copycat"
-    managed_by  = "terraform"
+    service    = "copycat"
+    managed_by = "terraform"
   }
 
   depends_on = [google_project_service.apis]
@@ -57,10 +56,9 @@ resource "google_secret_manager_secret" "target_ip_config" {
   }
 
   labels = {
-    environment = var.environment
-    service     = "copycat"
-    managed_by  = "terraform"
-    optional    = "true"
+    service    = "copycat"
+    managed_by = "terraform"
+    optional   = "true"
   }
 
   depends_on = [google_project_service.apis]

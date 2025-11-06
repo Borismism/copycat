@@ -91,6 +91,8 @@ export interface VideoListResponse {
 }
 
 // Channel types
+export type ActionStatus = 'new' | 'in_review' | 'legal_action' | 'resolved' | 'monitoring'
+
 export interface ChannelProfile {
   channel_id: string
   channel_title: string
@@ -107,6 +109,15 @@ export interface ChannelProfile {
   last_upload_date?: string
   posting_frequency_days?: number
   discovered_at: string
+  subscriber_count?: number
+  thumbnail_url?: string
+  video_count?: number
+  total_views?: number
+  // Enforcement tracking
+  action_status?: ActionStatus
+  assigned_to?: string
+  notes?: string
+  last_action_date?: string
 }
 
 export interface ChannelListResponse {

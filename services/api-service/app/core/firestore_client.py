@@ -97,6 +97,25 @@ class FirestoreClient:
 
         return videos, total
 
+    def _get_all_channel_stats(self) -> tuple[dict[str, int], dict[str, int]]:
+        """Calculate video counts and total views for ALL channels in one query."""
+        all_videos = self.videos_collection.stream()
+        channel_counts = {}
+        channel_views = {}
+
+        for video in all_videos:
+            data = video.to_dict()
+            channel_id = data.get("channel_id")
+            if channel_id:
+                # Count videos
+                channel_counts[channel_id] = channel_counts.get(channel_id, 0) + 1
+                # Sum views
+                view_count = data.get("view_count", 0)
+                if view_count:
+                    channel_views[channel_id] = channel_views.get(channel_id, 0) + view_count
+
+        return channel_counts, channel_views
+
     async def get_channel(self, channel_id: str) -> ChannelProfile | None:
         """Get a single channel by ID."""
         doc = self.channels_collection.document(channel_id).get()
@@ -110,6 +129,7 @@ class FirestoreClient:
         self,
         min_risk: int | None = None,
         tier: ChannelTier | None = None,
+        action_status: str | None = None,
         sort_by: str = "last_seen_at",
         sort_desc: bool = True,
         limit: int = 20,
@@ -138,26 +158,43 @@ class FirestoreClient:
         logger = logging.getLogger(__name__)
         from datetime import datetime, timezone
 
+        # Get video counts and view counts for ALL channels in one query
+        channel_video_counts, channel_views_map = self._get_all_channel_stats()
+
         all_channels = []
         for doc in all_channels_docs:
             data = doc.to_dict()
+            channel_id = data.get("channel_id", doc.id)
+
+            # Get total views and actual video count from the pre-computed maps
+            total_views = channel_views_map.get(channel_id, 0)
+            actual_video_count = channel_video_counts.get(channel_id, 0)
+
             # Fill in missing fields with defaults
             channel_data = {
-                "channel_id": data.get("channel_id", doc.id),
+                "channel_id": channel_id,
                 "channel_title": data.get("channel_title", "Unknown"),
                 "discovered_at": data.get("discovered_at", datetime.now(timezone.utc)),  # Required field!
-                "total_videos_found": data.get("total_videos_found", data.get("video_count", 0)),
+                "total_videos_found": actual_video_count,  # Use actual count from videos collection
                 "confirmed_infringements": data.get("confirmed_infringements", data.get("infringing_videos_count", 0)),
                 "videos_cleared": data.get("videos_cleared", 0),
                 "last_infringement_date": data.get("last_infringement_date"),
                 "infringement_rate": data.get("infringement_rate", 0.0),
-                "risk_score": data.get("risk_score", 0),
+                "risk_score": data.get("channel_risk", 0),
                 "tier": data.get("tier", "minimal").lower(),  # Enum expects lowercase!
                 "is_newly_discovered": data.get("is_newly_discovered", True),
                 "last_scanned_at": data.get("last_scanned_at"),
                 "next_scan_at": data.get("next_scan_at"),
                 "last_upload_date": data.get("last_seen_at"),  # Use last_seen_at as upload date
                 "posting_frequency_days": data.get("posting_frequency_days"),
+                "thumbnail_url": data.get("thumbnail_url"),
+                "subscriber_count": data.get("subscriber_count"),
+                "video_count": data.get("video_count"),
+                "total_views": total_views,  # Sum of view_count from all discovered videos
+                "action_status": data.get("action_status"),
+                "assigned_to": data.get("assigned_to"),
+                "notes": data.get("notes"),
+                "last_action_date": data.get("last_action_date"),
             }
             try:
                 all_channels.append(ChannelProfile(**channel_data))
@@ -172,12 +209,19 @@ class FirestoreClient:
             filtered_channels = [ch for ch in filtered_channels if ch.risk_score >= min_risk]
         if tier:
             filtered_channels = [ch for ch in filtered_channels if ch.tier == tier]
+        if action_status:
+            filtered_channels = [ch for ch in filtered_channels if ch.action_status == action_status]
+
+        # Update total to reflect filtered count
+        filtered_total = len(filtered_channels)
 
         # Sort in memory
         sort_key_map = {
             "video_count": lambda ch: ch.total_videos_found,
             "total_videos_found": lambda ch: ch.total_videos_found,
             "risk_score": lambda ch: ch.risk_score,
+            "confirmed_infringements": lambda ch: ch.confirmed_infringements or 0,
+            "last_scanned_at": lambda ch: ch.last_scanned_at or datetime.min.replace(tzinfo=timezone.utc),
             "discovered_at": lambda ch: ch.discovered_at,
             "last_seen_at": lambda ch: ch.last_upload_date or datetime.min.replace(tzinfo=timezone.utc),
         }
@@ -188,8 +232,8 @@ class FirestoreClient:
         # Apply pagination
         paginated_channels = filtered_channels[offset:offset+limit]
 
-        logger.info(f"Returning {len(paginated_channels)} channels out of {total} total (filtered: {len(filtered_channels)})")
-        return paginated_channels, total
+        logger.info(f"Returning {len(paginated_channels)} channels out of {filtered_total} filtered (total in DB: {total})")
+        return paginated_channels, filtered_total
 
     async def get_channel_stats(self) -> ChannelStats:
         """Get channel tier distribution statistics."""
@@ -321,3 +365,8 @@ class FirestoreClient:
 
 
 firestore_client = FirestoreClient()
+
+
+def get_firestore_client() -> FirestoreClient:
+    """Dependency injection for FastAPI."""
+    return firestore_client

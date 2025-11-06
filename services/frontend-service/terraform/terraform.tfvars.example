@@ -1,0 +1,26 @@
+# ==============================================================================
+# FRONTEND SERVICE - TERRAFORM VARIABLES
+# ==============================================================================
+# Copy this file to terraform.tfvars and fill in your values
+# ==============================================================================
+
+project_id   = "your-gcp-project-id"
+region       = "europe-west4"
+environment  = "dev" # or "prod"
+service_name = "frontend-service"
+
+# Image from Artifact Registry (set by CI/CD)
+# Note: This is a production build (npm run build -> Docker with nginx or Python server)
+image_name = "europe-west4-docker.pkg.dev/your-project-id/copycat-docker/frontend-service:latest"
+
+# Scaling configuration
+min_instances = 1  # Keep warm for fast page loads
+max_instances = 10 # Static assets, low load
+
+# Resource limits (lightweight for static content)
+cpu    = "1"
+memory = "256Mi"
+
+# Request configuration
+timeout_seconds = 30  # Fast response for static files
+concurrency     = 80  # Default Cloud Run concurrency

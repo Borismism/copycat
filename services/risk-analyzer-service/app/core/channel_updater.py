@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timezone
 
 from google.cloud import firestore
+from .channel_risk_calculator import ChannelRiskCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class ChannelUpdater:
         self.firestore = firestore_client
         self.channels_collection = "channels"
         self.videos_collection = "videos"
+        self.risk_calculator = ChannelRiskCalculator()
 
         logger.info("ChannelUpdater initialized")
 
@@ -81,9 +83,13 @@ class ChannelUpdater:
                 channel_data["videos_cleared"] = channel_data.get("videos_cleared", 0) + 1
 
             # Recalculate risk score
-            new_risk = self._calculate_channel_risk(channel_data)
-            old_risk = channel_data.get("risk_score", 0)
-            channel_data["risk_score"] = new_risk
+            risk_result = self.risk_calculator.calculate_channel_risk(channel_data)
+            new_risk = risk_result["channel_risk"]
+            old_risk = channel_data.get("channel_risk", 0)
+
+            # Store risk score
+            channel_data["channel_risk"] = new_risk
+            channel_data["channel_risk_factors"] = risk_result["factors"]
             channel_data["updated_at"] = datetime.now(timezone.utc)
 
             # Save to Firestore
@@ -94,80 +100,22 @@ class ChannelUpdater:
                 f"({'infringement' if contains_infringement else 'cleared'})"
             )
 
+            # Calculate infringement rate for return stats
+            total = channel_data.get("total_videos_analyzed", channel_data.get("total_videos_found", 0))
+            confirmed = channel_data.get("confirmed_infringements", 0)
+            infringement_rate = confirmed / total if total > 0 else 0.0
+
             return {
                 "channel_id": channel_id,
                 "old_risk": old_risk,
                 "new_risk": new_risk,
-                "infringement_rate": self._calculate_infringement_rate(channel_data),
+                "infringement_rate": infringement_rate,
             }
 
         except Exception as e:
             logger.error(f"Error updating channel {channel_id}: {e}")
             return {}
 
-    def _calculate_channel_risk(self, channel_data: dict) -> int:
-        """
-        Calculate channel risk score (0-100).
-
-        Factors:
-        - Infringement rate (0-70 points): % of videos confirmed as infringing
-        - Volume (0-20 points): Total number of infringements
-        - Recency (0-10 points): How recent was last infringement
-
-        Args:
-            channel_data: Channel document data
-
-        Returns:
-            Risk score 0-100
-        """
-        risk = 0
-
-        # Factor 1: Infringement rate (70 points max)
-        infringement_rate = self._calculate_infringement_rate(channel_data)
-        risk += int(infringement_rate * 70)
-
-        # Factor 2: Volume (20 points max)
-        confirmed = channel_data.get("confirmed_infringements", 0)
-        if confirmed >= 10:
-            risk += 20
-        elif confirmed >= 5:
-            risk += 15
-        elif confirmed >= 3:
-            risk += 10
-        elif confirmed >= 1:
-            risk += 5
-
-        # Factor 3: Recency (10 points max)
-        last_infringement = channel_data.get("last_infringement_date")
-        if last_infringement:
-            if isinstance(last_infringement, datetime):
-                days_since = (datetime.now(timezone.utc) - last_infringement).days
-            else:
-                days_since = 999  # Firestore timestamp, assume old
-
-            if days_since <= 7:
-                risk += 10
-            elif days_since <= 30:
-                risk += 5
-
-        return min(risk, 100)
-
-    def _calculate_infringement_rate(self, channel_data: dict) -> float:
-        """
-        Calculate infringement rate (0.0-1.0).
-
-        Args:
-            channel_data: Channel document data
-
-        Returns:
-            Infringement rate as decimal
-        """
-        total = channel_data.get("total_videos_analyzed", 0)
-        if total == 0:
-            return 0.0
-
-        confirmed = channel_data.get("confirmed_infringements", 0)
-        return confirmed / total
 
     def batch_update_from_videos(self, video_ids: list[str]) -> dict:
         """
@@ -239,8 +187,8 @@ class ChannelUpdater:
         try:
             query = (
                 self.firestore.collection(self.channels_collection)
-                .where("risk_score", ">=", min_risk)
-                .order_by("risk_score", direction=firestore.Query.DESCENDING)
+                .where("channel_risk", ">=", min_risk)
+                .order_by("channel_risk", direction=firestore.Query.DESCENDING)
                 .limit(limit)
             )
 

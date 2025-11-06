@@ -266,6 +266,13 @@ class RiskAnalyzer:
                 f"infringement={contains_infringement}"
             )
 
+            # Update channel infringement counts
+            self.channel_updater.update_after_analysis(
+                channel_id=channel_id,
+                video_id=video_id,
+                contains_infringement=contains_infringement
+            )
+
             # Always recalculate - both positive (infringement) and negative (clean) feedback matters!
             # Clean videos should LOWER channel risk over time
 

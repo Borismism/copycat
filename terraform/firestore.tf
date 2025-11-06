@@ -6,12 +6,12 @@
 # ==============================================================================
 
 resource "google_firestore_database" "copycat" {
-  name        = "copycat-${var.environment}"
+  name        = "(default)"
   location_id = var.region
   type        = "FIRESTORE_NATIVE"
 
-  # Prevent accidental deletion in production
-  deletion_policy = var.environment == "prod" ? "ABANDON" : "DELETE"
+  # Prevent accidental deletion
+  deletion_policy = "ABANDON"
 }
 
 # ==============================================================================
@@ -596,6 +596,196 @@ resource "google_firestore_index" "channels_with_infringements" {
 
   fields {
     field_path = "total_infringing_views"
+    order      = "DESCENDING"
+  }
+}
+
+# ==============================================================================
+# ADDITIONAL INDEXES FOR PERFORMANCE
+# ==============================================================================
+
+# Index 22: Videos by scan priority and status (for vision analyzer worker)
+# Use case: Get high-priority unscanned videos
+# Query: .where("status", "in", ["discovered"]).where("scan_priority", ">=", 30).order_by("scan_priority", DESC)
+resource "google_firestore_index" "videos_by_status_and_scan_priority" {
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "scan_priority"
+    order      = "DESCENDING"
+  }
+}
+
+# Index 23: Videos by scan priority and status (alternative - inequality first)
+# Use case: Get videos by priority threshold
+# Query: .where("scan_priority", ">=", 30).where("status", "==", "discovered").order_by("scan_priority", DESC)
+resource "google_firestore_index" "videos_by_priority_and_status" {
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "scan_priority"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+}
+
+# Index 24: Videos by status and updated_at (for analytics)
+# Use case: Recently analyzed videos
+# Query: .where("status", "==", "analyzed").order_by("updated_at", DESC)
+resource "google_firestore_index" "videos_by_status_and_updated_at" {
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "updated_at"
+    order      = "DESCENDING"
+  }
+}
+
+# Index 25: Videos by matched IPs and deleted status
+# Use case: Find deleted videos for a specific IP config
+# Query: .where("matched_ips", "array-contains", "config_id").where("deleted", "==", true)
+resource "google_firestore_index" "videos_by_ip_and_deleted" {
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "matched_ips"
+    array_config = "CONTAINS"
+  }
+
+  fields {
+    field_path = "deleted"
+    order      = "ASCENDING"
+  }
+}
+
+# Index 26: Videos by channel and status IN query
+# Use case: Find pending/discovered videos for a channel
+# Query: .where("channel_id", "==", "...").where("status", "in", ["discovered", "pending"])
+resource "google_firestore_index" "videos_by_channel_and_status" {
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "channel_id"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+}
+
+# ==============================================================================
+# SEARCH_HISTORY COLLECTION INDEXES
+# ==============================================================================
+
+# Index 27: Search history by keyword, order, and time
+# Use case: Deduplicate recent searches for same keyword+order combination
+# Query: .where("keyword", "==", "...").where("order", "==", "...").where("searched_at", ">=", cutoff).order_by("searched_at", DESC)
+resource "google_firestore_index" "search_history_by_keyword_order_time" {
+  database   = google_firestore_database.copycat.name
+  collection = "search_history"
+
+  fields {
+    field_path = "keyword"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "order"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "searched_at"
+    order      = "DESCENDING"
+  }
+}
+
+# Index 28: Search history by searched_at (for cleanup)
+# Use case: Clean up old search history entries
+# Query: .where("searched_at", "<", cutoff).order_by("searched_at", ASC)
+resource "google_firestore_index" "search_history_by_time" {
+  database   = google_firestore_database.copycat.name
+  collection = "search_history"
+
+  fields {
+    field_path = "searched_at"
+    order      = "ASCENDING"
+  }
+}
+
+# ==============================================================================
+# CHANNELS COLLECTION - ADDITIONAL INDEXES
+# ==============================================================================
+
+# Index 29: Channels by risk threshold
+# Use case: Get all channels above certain risk level
+# Query: .where("channel_risk", ">=", 50).order_by("channel_risk", DESC)
+resource "google_firestore_index" "channels_by_risk_threshold" {
+  database   = google_firestore_database.copycat.name
+  collection = "channels"
+
+  fields {
+    field_path = "channel_risk"
+    order      = "DESCENDING"
+  }
+}
+
+# ==============================================================================
+# DISCOVERY_HISTORY COLLECTION INDEXES
+# ==============================================================================
+
+# Index 30: Discovery history by timestamp
+# Use case: Get recent discovery runs
+# Query: .order_by("timestamp", DESC)
+resource "google_firestore_index" "discovery_history_by_timestamp" {
+  database   = google_firestore_database.copycat.name
+  collection = "discovery_history"
+
+  fields {
+    field_path = "timestamp"
+    order      = "DESCENDING"
+  }
+}
+
+# ==============================================================================
+# SCAN_HISTORY COLLECTION INDEXES
+# ==============================================================================
+
+# Index 31: Scan history by channel and started_at
+# Use case: Get recent scans for a channel
+# Query: .where("channel_id", "==", "...").order_by("started_at", DESC)
+resource "google_firestore_index" "scan_history_by_channel_time" {
+  database   = google_firestore_database.copycat.name
+  collection = "scan_history"
+
+  fields {
+    field_path = "channel_id"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "started_at"
     order      = "DESCENDING"
   }
 }

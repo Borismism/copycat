@@ -22,6 +22,7 @@ from .quota_manager import QuotaManager
 from .search_randomizer import SearchRandomizer, SearchOrder
 from .video_processor import VideoProcessor
 from .youtube_client import YouTubeClient
+from .search_history import SearchHistory
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class DiscoveryEngine:
         video_processor: VideoProcessor,
         quota_manager: QuotaManager,
         search_randomizer: SearchRandomizer | None = None,
+        search_history: SearchHistory | None = None,
     ):
         """
         Initialize discovery engine.
@@ -58,8 +60,9 @@ class DiscoveryEngine:
         self.processor = video_processor
         self.quota = quota_manager
         self.randomizer = search_randomizer or SearchRandomizer()
+        self.search_history = search_history
 
-        logger.info("DiscoveryEngine initialized (smart query-based)")
+        logger.info("DiscoveryEngine initialized (smart query-based + search history)")
 
     async def discover(self, max_quota: int = 10_000, progress_callback=None) -> DiscoveryStats:
         """
@@ -134,6 +137,25 @@ class DiscoveryEngine:
             if query_key in queries_processed:
                 logger.debug(f"⏭️  Skipping '{params.query}' order={params.order.value} (already processed)")
                 continue
+
+            # Check search history to avoid duplicate searches
+            logger.debug(f"Search history check: self.search_history={self.search_history is not None}, is_channel={params.query.startswith('CHANNEL:')}")
+            if self.search_history and not params.query.startswith("CHANNEL:"):
+                logger.info(f"🔍 Checking search history for '{params.query}' order={params.order.value}")
+                should_search, time_window = await self.search_history.should_search(
+                    keyword=params.query,
+                    order=params.order.value
+                )
+
+                if not should_search:
+                    logger.info(f"⏭️  SKIP: '{params.query}' order={params.order.value} - searched too recently")
+                    continue
+
+                # Apply intelligent time window if suggested
+                if time_window:
+                    logger.info(f"🎯 Applying time window: {time_window['published_after'][:10]} to {time_window['published_before'][:10]}")
+                    params.published_after = time_window['published_after']
+                    params.published_before = time_window['published_before']
 
             logger.info(f"\n{'='*80}")
             logger.info(f"🔍 QUERY {idx}/{len(search_plan)}: '{params.query}' order={params.order.value}")
@@ -232,18 +254,7 @@ class DiscoveryEngine:
                     self.quota.record_usage("video_details", details_batches)
                     logger.info(f"   → Enriched with video details ({details_batches} batch calls)")
 
-                # Send query results to callback
-                if progress_callback:
-                    await progress_callback({
-                        'type': 'query_result',
-                        'keyword': params.query,
-                        'order': params.order.value,
-                        'results_count': len(results),
-                        'quota_used': search_quota,
-                        'total_quota_used': quota_used
-                    })
-
-                # Process results
+                # Process results FIRST to get accurate counts
                 new_count, rediscovered_count, skipped_count = self._process_results(
                     results
                 )
@@ -251,6 +262,42 @@ class DiscoveryEngine:
                 videos_discovered += new_count
                 videos_rediscovered += rediscovered_count
                 videos_skipped += skipped_count
+
+                # Send query results to callback with detailed breakdown
+                if progress_callback:
+                    callback_data = {
+                        'type': 'query_result',
+                        'keyword': params.query,
+                        'order': params.order.value,
+                        'results_count': len(results),  # Raw YouTube results
+                        'new_count': new_count,  # Actually new
+                        'rediscovered_count': rediscovered_count,  # Already known
+                        'skipped_count': skipped_count,  # Already scanned
+                        'quota_used': search_quota,
+                        'total_quota_used': quota_used
+                    }
+                    # Include time window if present
+                    if params.published_after:
+                        callback_data['time_window'] = {
+                            'published_after': params.published_after,
+                            'published_before': params.published_before
+                        }
+                    await progress_callback(callback_data)
+
+                # Record search in history (for keyword searches only)
+                if self.search_history and not params.query.startswith("CHANNEL:"):
+                    time_window = None
+                    if params.published_after:
+                        time_window = {
+                            'published_after': params.published_after,
+                            'published_before': params.published_before
+                        }
+                    await self.search_history.record_search(
+                        keyword=params.query,
+                        order=params.order.value,
+                        results_count=len(results),
+                        time_window=time_window
+                    )
 
                 logger.info(
                     f"✅ QUERY '{params.query}' order={params.order.value} COMPLETE:"

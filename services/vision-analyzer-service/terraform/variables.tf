@@ -1,21 +1,28 @@
+# ==============================================================================
+# VISION ANALYZER SERVICE - TERRAFORM VARIABLES
+# ==============================================================================
+
 variable "project_id" {
-  description = "GCP project ID"
+  description = "GCP Project ID"
   type        = string
 }
 
 variable "region" {
-  description = "GCP region"
+  description = "GCP Region for Cloud Run"
   type        = string
   default     = "europe-west4"
 }
 
-variable "environment" {
-  description = "Environment (dev, prod)"
+variable "gemini_location" {
+  description = "GCP Region for Gemini/Vertex AI (us-central1 recommended)"
   type        = string
-  validation {
-    condition     = contains(["dev", "prod"], var.environment)
-    error_message = "Environment must be either 'dev' or 'prod'."
-  }
+  default     = "us-central1"
+}
+
+variable "environment" {
+  description = "Environment (dev/prod)"
+  type        = string
+  default     = "dev"
 }
 
 variable "service_name" {
@@ -25,42 +32,45 @@ variable "service_name" {
 }
 
 variable "image_name" {
-  description = "Docker image name with tag"
+  description = "Docker image URL from Artifact Registry"
   type        = string
 }
 
+# Scaling configuration
 variable "min_instances" {
   description = "Minimum number of instances"
   type        = number
-  default     = 0  # Scale to zero when idle
+  default     = 0
 }
 
 variable "max_instances" {
   description = "Maximum number of instances"
   type        = number
-  default     = 5  # Lower than other services (expensive operations)
+  default     = 10
 }
 
+# Resource limits
 variable "cpu" {
-  description = "CPU allocation (1000m = 1 vCPU)"
+  description = "CPU allocation"
   type        = string
-  default     = "2000m"  # 2 vCPU for Gemini API calls
+  default     = "2"
 }
 
 variable "memory" {
   description = "Memory allocation"
   type        = string
-  default     = "1Gi"  # More memory for video processing
+  default     = "2Gi"
 }
 
+# Request configuration
 variable "timeout_seconds" {
   description = "Request timeout in seconds"
   type        = number
-  default     = 600  # 10 minutes for long videos
+  default     = 600
 }
 
 variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
-  default     = 10  # Lower concurrency for expensive operations
+  default     = 1 # Process one video at a time
 }

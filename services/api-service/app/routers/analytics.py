@@ -40,9 +40,8 @@ async def get_hourly_stats(hours: int = 24):
                 "infringements": 0,
             }
 
-        # Query ALL videos and filter in memory (Firestore datetime queries can be tricky)
-        # This is more reliable for small datasets
-
+        # Query ALL videos and filter in memory
+        # Note: We need all videos because analyses/infringements may happen days after discovery
         all_video_docs = firestore_client.videos_collection.stream()
 
         for video in all_video_docs:
@@ -82,12 +81,10 @@ async def get_hourly_stats(hours: int = 24):
                 if data.get("status") == "analyzed":
                     hourly_data[hour_key]["analyses"] += 1
 
-                    # Count infringements
-                    vision_analysis = data.get("vision_analysis", {})
-                    if isinstance(vision_analysis, dict):
-                        full_analysis = vision_analysis.get("full_analysis", vision_analysis)
-                        if full_analysis.get("contains_infringement"):
-                            hourly_data[hour_key]["infringements"] += 1
+                    # Count infringements (new structure: analysis.contains_infringement)
+                    analysis = data.get("analysis", {})
+                    if isinstance(analysis, dict) and analysis.get("contains_infringement"):
+                        hourly_data[hour_key]["infringements"] += 1
 
         return {
             "hours": sorted(hourly_data.values(), key=lambda x: x["timestamp"])
@@ -258,13 +255,12 @@ async def get_performance_metrics():
                 total_spent = 0
                 budget_utilization = 0
 
-        # Queue health (pending videos)
-        pending_videos = len(list(
-            firestore_client.videos_collection.where("status", "==", "discovered").limit(5000).stream()
-        ))
+        # Queue health (pending videos) - use count aggregation for performance
+        from google.cloud.firestore_v1.aggregation import CountAggregation
+        pending_videos = firestore_client.videos_collection.where("status", "==", "discovered").count().get()[0][0].value
 
         # Calculate scores (0-100)
-        discovery_score = min(100, (discovery_efficiency / 3.0) * 100) if discovery_efficiency > 0 else 0
+        discovery_score = min(100, (discovery_efficiency / 0.5) * 100) if discovery_efficiency > 0 else 0
         throughput_score = min(100, (analysis_throughput / 25.0) * 100) if analysis_throughput > 0 else 0
         budget_score = budget_utilization * 100
         queue_score = 100 if pending_videos < 5000 else 50 if pending_videos < 10000 else 25
@@ -272,7 +268,7 @@ async def get_performance_metrics():
         return {
             "discovery_efficiency": {
                 "value": round(discovery_efficiency, 2),
-                "target": 3.0,
+                "target": 0.5,
                 "score": round(discovery_score, 1),
                 "status": "excellent" if discovery_score >= 90 else "good" if discovery_score >= 70 else "fair",
             },

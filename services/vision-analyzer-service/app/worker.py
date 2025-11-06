@@ -160,6 +160,7 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
     Args:
         message: PubSub message from scan-ready topic
     """
+    scan_id = None  # Initialize scan_id for error handling
     try:
         # Parse message
         data = json.loads(message.data.decode("utf-8"))
@@ -198,9 +199,32 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
             message.ack()
             return
 
+        # Create scan history entry
+        import uuid
+        scan_id = str(uuid.uuid4())
+        firestore_client = firestore.Client(project=settings.gcp_project_id)
+
+        scan_history = {
+            "scan_id": scan_id,
+            "scan_type": "video_single",
+            "video_id": scan_message.video_id,
+            "video_title": scan_message.metadata.title,
+            "channel_id": scan_message.metadata.channel_id,
+            "channel_title": scan_message.metadata.channel_title,
+            "status": "running",
+            "started_at": firestore.SERVER_TIMESTAMP,
+            "matched_ips": scan_message.metadata.matched_ips,
+        }
+
+        try:
+            firestore_client.collection("scan_history").document(scan_id).set(scan_history)
+            logger.info(f"Created scan history: {scan_id} for video {scan_message.video_id}")
+        except Exception as e:
+            logger.warning(f"Failed to create scan history: {e}")
+            # Continue anyway - not critical
+
         # Update video status to "processing"
         try:
-            firestore_client = firestore.Client(project=settings.gcp_project_id)
             doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(
                 scan_message.video_id
             )
@@ -215,40 +239,87 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
 
         # Load IP configs for this video
         matched_ips = scan_message.metadata.matched_ips
-        logger.info(f"Loading configs for IPs: {matched_ips}")
 
-        configs = []
-        for ip_id in matched_ips:
-            config = config_loader.get_config(ip_id)
-            if config:
-                configs.append(config)
-                logger.info(f"✅ Loaded config: {config.name}")
-            else:
-                logger.error(f"❌ Config not found for IP: {ip_id}")
-
-        # No fallback - matched_ips MUST be present from discovery-service
-        if not configs:
-            logger.error(
-                f"❌ No valid configs for video {scan_message.video_id}. "
-                f"matched_ips={matched_ips}. This should never happen!"
+        # If no IPs matched, scan against ALL IPs to catch potential infringements
+        if not matched_ips:
+            logger.info(
+                f"⚠️  No matched_ips for video {scan_message.video_id}. "
+                "Loading ALL IP configs for comprehensive scan."
             )
-            # Update video status to failed
-            try:
-                firestore_client = firestore.Client(project=settings.gcp_project_id)
-                doc_ref = firestore_client.collection(
-                    settings.firestore_videos_collection
-                ).document(scan_message.video_id)
-                doc_ref.update({
-                    "status": "failed",
-                    "error_message": f"No IP configs found for matched_ips={matched_ips}",
-                    "error_type": "ConfigurationError",
-                    "failed_at": firestore.SERVER_TIMESTAMP,
-                })
-            except Exception as e:
-                logger.error(f"Failed to update video status: {e}")
+            configs = config_loader.get_all_configs()
+            if configs:
+                logger.info(f"✅ Loaded {len(configs)} IP configs for comprehensive scan")
+            else:
+                logger.error("❌ No IP configs available in system!")
+                # Update scan history to failed
+                try:
+                    firestore_client.collection("scan_history").document(scan_id).update({
+                        "status": "failed",
+                        "completed_at": firestore.SERVER_TIMESTAMP,
+                        "error_message": "No IP configs available in system",
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to update scan history: {e}")
 
-            message.ack()  # Don't retry - this is a data problem
-            return
+                # Update video status to failed
+                try:
+                    doc_ref = firestore_client.collection(
+                        settings.firestore_videos_collection
+                    ).document(scan_message.video_id)
+                    doc_ref.update({
+                        "status": "failed",
+                        "error_message": "No IP configs available in system",
+                        "error_type": "ConfigurationError",
+                        "failed_at": firestore.SERVER_TIMESTAMP,
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to update video status: {e}")
+
+                message.ack()  # Don't retry - this is a system configuration problem
+                return
+        else:
+            # Load specific IP configs that matched
+            logger.info(f"Loading configs for matched IPs: {matched_ips}")
+            configs = []
+            for ip_id in matched_ips:
+                config = config_loader.get_config(ip_id)
+                if config:
+                    configs.append(config)
+                    logger.info(f"✅ Loaded config: {config.name}")
+                else:
+                    logger.error(f"❌ Config not found for IP: {ip_id}")
+
+            if not configs:
+                logger.error(
+                    f"❌ No valid configs for video {scan_message.video_id}. "
+                    f"matched_ips={matched_ips}."
+                )
+                # Update scan history to failed
+                try:
+                    firestore_client.collection("scan_history").document(scan_id).update({
+                        "status": "failed",
+                        "completed_at": firestore.SERVER_TIMESTAMP,
+                        "error_message": f"No IP configs found for matched_ips={matched_ips}",
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to update scan history: {e}")
+
+                # Update video status to failed
+                try:
+                    doc_ref = firestore_client.collection(
+                        settings.firestore_videos_collection
+                    ).document(scan_message.video_id)
+                    doc_ref.update({
+                        "status": "failed",
+                        "error_message": f"No IP configs found for matched_ips={matched_ips}",
+                        "error_type": "ConfigurationError",
+                        "failed_at": firestore.SERVER_TIMESTAMP,
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to update video status: {e}")
+
+                message.ack()  # Don't retry - this is a data problem
+                return
 
         # Process video analysis with configs
         import asyncio
@@ -269,12 +340,41 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
             f"action={result.analysis.overall_recommendation}"
         )
 
+        # Update scan history to completed
+        try:
+            firestore_client.collection("scan_history").document(scan_id).update({
+                "status": "completed",
+                "completed_at": firestore.SERVER_TIMESTAMP,
+                "result": {
+                    "success": True,
+                    "has_infringement": has_infringement,
+                    "overall_recommendation": result.analysis.overall_recommendation,
+                    "cost_usd": result.metrics.cost_usd,
+                    "ip_count": len(result.analysis.ip_results),
+                }
+            })
+            logger.info(f"Updated scan history {scan_id} to completed")
+        except Exception as e:
+            logger.error(f"Failed to update scan history: {e}", exc_info=True)
+
     except Exception as e:
         logger.error(f"Failed to process message: {e}", exc_info=True)
 
+        # Update scan history to failed (only if scan_id was created)
+        if scan_id:
+            try:
+                firestore_client = firestore.Client(project=settings.gcp_project_id)
+                firestore_client.collection("scan_history").document(scan_id).update({
+                    "status": "failed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "error_message": str(e),
+                })
+                logger.info(f"Updated scan history {scan_id} to failed")
+            except:
+                pass
+
         # Update video status to failed with error details
         try:
-            firestore_client = firestore.Client(project=settings.gcp_project_id)
             doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(
                 scan_message.video_id
             )

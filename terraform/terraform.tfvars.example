@@ -1,0 +1,68 @@
+# ==============================================================================
+# COPYCAT GLOBAL INFRASTRUCTURE - TERRAFORM VARIABLES
+# ==============================================================================
+# Copy this file to terraform.tfvars and fill in your values
+#
+# This configures the global infrastructure shared by all services:
+# - Firestore database
+# - PubSub topics
+# - BigQuery dataset
+# - Cloud Storage buckets
+# - Artifact Registry
+# - Workload Identity Federation (for GitHub Actions)
+# - Identity-Aware Proxy (for frontend authentication)
+# ==============================================================================
+
+# GCP Project Configuration
+project_id = "your-gcp-project-id"  # REQUIRED: Your GCP project ID
+region     = "europe-west4"         # OPTIONAL: Default is europe-west4 (Netherlands)
+environment = "dev"                 # OPTIONAL: dev or prod
+
+# GitHub Repository Configuration (for Workload Identity Federation)
+github_repository = "owner/repo"    # REQUIRED: Format: "owner/repo" (e.g., "anthropics/copycat")
+
+# Frontend Domain Configuration
+frontend_domain = "copycat.example.com"  # REQUIRED: Your custom domain for frontend
+                                          # Add A record pointing to load balancer IP after deployment
+
+# IAP Configuration
+iap_support_email = "support@example.com"  # REQUIRED: Email for OAuth consent screen
+
+# IAP Authorized Users
+# List of users/groups who can access the IAP-protected frontend
+iap_authorized_users = [
+  "user:alice@example.com",
+  "user:bob@example.com",
+  "group:admins@example.com",
+]
+
+# ==============================================================================
+# DEPLOYMENT INSTRUCTIONS
+# ==============================================================================
+#
+# 1. Copy this file:
+#    cp terraform.tfvars.example terraform.tfvars
+#
+# 2. Edit terraform.tfvars with your values
+#
+# 3. Initialize Terraform:
+#    terraform init \
+#      -backend-config="bucket=YOUR_PROJECT_ID-terraform-state" \
+#      -backend-config="prefix=copycat/global-infra"
+#
+# 4. Review the plan:
+#    terraform plan
+#
+# 5. Apply the configuration:
+#    terraform apply
+#
+# 6. Note the outputs and configure GitHub secrets:
+#    - GCP_WORKLOAD_IDENTITY_PROVIDER (from output: wif_provider)
+#    - GCP_SERVICE_ACCOUNT (from output: wif_service_account)
+#
+# 7. Configure DNS A record:
+#    - Domain: (from var.frontend_domain)
+#    - Type: A
+#    - Value: (from output: frontend_lb_ip)
+#
+# ==============================================================================

@@ -1,0 +1,25 @@
+# ==============================================================================
+# RISK ANALYZER SERVICE - TERRAFORM VARIABLES
+# ==============================================================================
+# Copy this file to terraform.tfvars and fill in your values
+# ==============================================================================
+
+project_id   = "your-gcp-project-id"
+region       = "europe-west4"
+environment  = "dev" # or "prod"
+service_name = "risk-analyzer-service"
+
+# Image from Artifact Registry (set by CI/CD)
+image_name = "europe-west4-docker.pkg.dev/your-project-id/copycat-docker/risk-analyzer-service:latest"
+
+# Scaling configuration
+min_instances = 0 # Scale to zero when idle
+max_instances = 10
+
+# Resource limits
+cpu    = "1"
+memory = "512Mi"
+
+# Request configuration
+timeout_seconds = 600 # 10 minutes for risk calculation
+concurrency     = 10  # Requests per instance

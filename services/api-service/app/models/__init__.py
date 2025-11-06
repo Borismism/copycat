@@ -110,6 +110,15 @@ class ChannelProfile(BaseModel):
     last_upload_date: datetime | None = None
     posting_frequency_days: float | None = None
     discovered_at: datetime
+    thumbnail_url: str | None = None
+    subscriber_count: int | None = None
+    video_count: int | None = None  # Total videos on YouTube channel
+    total_views: int = 0  # Sum of view_count from all discovered videos
+    # Enforcement tracking
+    action_status: str | None = None
+    assigned_to: str | None = None
+    notes: str | None = None
+    last_action_date: datetime | None = None
 
     @model_validator(mode="after")
     def compute_tier_and_rate(self) -> "ChannelProfile":

@@ -1,13 +1,51 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import useSWR from 'swr'
 import { Link } from 'react-router-dom'
 import { visionAPI } from '../api/vision'
+import { videosAPI } from '../api/videos'
+import AnalysisDetailModal from '../components/AnalysisDetailModal'
+import ScanProgressNotification from '../components/ScanProgressNotification'
+
+interface ScanHistory {
+  scan_id: string
+  scan_type: 'video_single'
+  channel_id?: string
+  channel_title?: string
+  video_id: string
+  video_title: string
+  started_at: { seconds: number } | string | number
+  completed_at?: { seconds: number } | string | number
+  status: 'running' | 'completed' | 'failed'
+  result?: {
+    success?: boolean
+    has_infringement?: boolean
+    overall_recommendation?: string
+    cost_usd?: number
+    ip_count?: number
+  }
+  error_message?: string
+  matched_ips?: string[]
+}
 
 export default function VisionAnalyzerPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [batchSize, setBatchSize] = useState(10)
   const [showConfirmDialog, setShowConfirmDialog] = useState(false)
   const [notification, setNotification] = useState<{type: 'success' | 'error', message: string} | null>(null)
+  const [showProgressNotification, setShowProgressNotification] = useState(false)
+
+  // Analysis detail modal
+  const [selectedScan, setSelectedScan] = useState<{scan: ScanHistory, video: any} | null>(null)
+  const [analysisModalOpen, setAnalysisModalOpen] = useState(false)
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false)
+
+  // Scan history with infinite scroll
+  const [scans, setScans] = useState<ScanHistory[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyPage, setHistoryPage] = useState(0)
+  const [hasMoreHistory, setHasMoreHistory] = useState(true)
+  const observerTarget = useRef<HTMLDivElement>(null)
+  const limit = 20
 
   // Fetch real-time data
   const { data: budgetStats } = useSWR(
@@ -22,17 +60,142 @@ export default function VisionAnalyzerPage() {
     { refreshInterval: 15000 }
   )
 
+  // Fetch currently processing videos
+  const { data: processingVideos } = useSWR(
+    'processing-videos',
+    async () => {
+      const response = await fetch('/api/videos/processing/list')
+      if (!response.ok) return []
+      const data = await response.json()
+      return data.videos || []
+    },
+    { refreshInterval: 3000 } // Refresh every 3 seconds
+  )
+
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({type, message})
     setTimeout(() => setNotification(null), 4000)
+  }
+
+  // Load scan history
+  const loadHistory = useCallback(async (page: number) => {
+    if (historyLoading) return
+
+    setHistoryLoading(true)
+    try {
+      const response = await fetch(`/api/channels/scan-history?limit=${limit}&offset=${page * limit}`)
+      const data = await response.json()
+
+      if (data.scans && data.scans.length > 0) {
+        setScans(prev => page === 0 ? data.scans : [...prev, ...data.scans])
+        setHasMoreHistory(data.scans.length === limit)
+      } else {
+        setHasMoreHistory(false)
+      }
+    } catch (err) {
+      console.error('Failed to load scan history:', err)
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [historyLoading, limit])
+
+  // Initial load
+  useEffect(() => {
+    loadHistory(0)
+  }, [])
+
+  // Auto-refresh every 5 seconds to show current running scans
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Reload the first page to get latest scans
+      loadHistory(0)
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [loadHistory])
+
+  // Infinite scroll observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasMoreHistory && !historyLoading) {
+          const nextPage = historyPage + 1
+          setHistoryPage(nextPage)
+          loadHistory(nextPage)
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    const currentTarget = observerTarget.current
+    if (currentTarget) {
+      observer.observe(currentTarget)
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget)
+      }
+    }
+  }, [hasMoreHistory, historyLoading, historyPage, loadHistory])
+
+  const formatDate = (timestamp: { seconds: number } | string | number) => {
+    let date: Date
+    if (typeof timestamp === 'string') {
+      // ISO string format from API
+      date = new Date(timestamp)
+    } else if (typeof timestamp === 'number') {
+      // Unix timestamp
+      date = new Date(timestamp * 1000)
+    } else if (timestamp && typeof timestamp === 'object' && 'seconds' in timestamp) {
+      // Firestore timestamp format
+      date = new Date(timestamp.seconds * 1000)
+    } else {
+      return 'Unknown'
+    }
+    return date.toLocaleString()
+  }
+
+  const getTypeLabel = (type: string) => {
+    if (type === 'video_single') return '🎬 Video Scan'
+    return type
+  }
+
+  const getStatusColor = (status: string) => {
+    if (status === 'completed') return 'text-green-600'
+    if (status === 'failed') return 'text-red-600'
+    return 'text-blue-600'
+  }
+
+  const handleScanClick = async (scan: ScanHistory) => {
+    if (scan.status !== 'completed') return
+
+    setLoadingAnalysis(true)
+
+    // Fetch analysis data
+    try {
+      const video = await videosAPI.getVideo(scan.video_id)
+      if (video.vision_analysis) {
+        // Open modal with analysis
+        setSelectedScan({scan, video})
+        setAnalysisModalOpen(true)
+      } else {
+        showNotification('error', 'Analysis data not found for this video')
+      }
+    } catch (error) {
+      console.error('Failed to fetch analysis:', error)
+      showNotification('error', 'Failed to load analysis details')
+    } finally {
+      setLoadingAnalysis(false)
+    }
   }
 
   const handleBatchScan = async () => {
     setIsScanning(true)
     setShowConfirmDialog(false)
     try {
-      const result = await visionAPI.startBatchScan(batchSize)
-      showNotification('success', `Batch scan started! ${result.videos_queued} videos queued.`)
+      await visionAPI.startBatchScan(batchSize)
+      // No notifications needed - user is already on the Vision page viewing scan history
     } catch (error) {
       showNotification('error', `Failed to start batch scan: ${(error as Error).message}`)
     } finally {
@@ -168,6 +331,191 @@ export default function VisionAnalyzerPage() {
             <span className="text-4xl">✅</span>
           </div>
         </div>
+      </div>
+
+      {/* Scan History Section with Infinite Scroll */}
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-xl font-bold text-gray-900">Scan History</h3>
+            <p className="text-gray-600 text-sm">
+              {scans.filter(s => s.status === 'running').length} running • {scans.length} total operations
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              Auto-updating every 5s
+            </div>
+          </div>
+        </div>
+
+        {scans.length === 0 && !historyLoading ? (
+          <div className="text-center py-12">
+            <span className="text-6xl">📊</span>
+            <p className="text-gray-500 mt-4">No scan history yet</p>
+            <p className="text-sm text-gray-400 mt-1">Start a batch scan to see results here</p>
+          </div>
+        ) : (
+          <div className="max-h-[600px] overflow-y-auto space-y-3 pr-2">
+            {/* Currently Processing Videos - Real-time */}
+            {processingVideos && processingVideos.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-bold text-purple-600 mb-2 flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Currently Analyzing Videos ({processingVideos.length})
+                </h4>
+                <div className="space-y-2">
+                  {processingVideos.slice(0, 5).map((video: any) => (
+                    <div
+                      key={video.video_id}
+                      className="border-2 border-purple-500 bg-purple-50 rounded-lg p-4"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="text-sm font-medium">🎬 Video</span>
+                          <a
+                            href={`https://youtube.com/watch?v=${video.video_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs px-2 py-1 rounded-full bg-purple-200 text-purple-900 hover:bg-purple-300 truncate font-medium max-w-xs"
+                            title={video.title}
+                          >
+                            {video.title}
+                          </a>
+                        </div>
+                        <span className="text-sm font-bold text-purple-600 flex items-center gap-1 flex-shrink-0">
+                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Analyzing...
+                        </span>
+                      </div>
+                      <div className="text-xs text-purple-700 flex justify-between items-center">
+                        <span>{video.channel_title}</span>
+                        {video.matched_ips && video.matched_ips.length > 0 && (
+                          <span className="px-2 py-0.5 bg-purple-200 rounded-full">
+                            {video.matched_ips[0]}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {processingVideos.length > 5 && (
+                    <div className="text-xs text-gray-500 text-center py-2">
+                      + {processingVideos.length - 5} more videos being analyzed
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+
+            {/* All Scans */}
+            {scans.map((scan) => (
+              <div
+                key={scan.scan_id}
+                onClick={() => handleScanClick(scan)}
+                className={`border border-gray-200 rounded-lg p-4 transition-colors ${
+                  scan.status === 'completed'
+                    ? 'cursor-pointer hover:bg-gray-50 hover:border-blue-300'
+                    : 'cursor-default hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className="text-sm font-medium">{getTypeLabel(scan.scan_type)}</span>
+                    <a
+                      href={`https://youtube.com/watch?v=${scan.video_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-xs px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 max-w-xs truncate"
+                      title={scan.video_title}
+                    >
+                      {scan.video_title}
+                    </a>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {scan.status === 'completed' && (
+                      <span className="text-xs text-blue-500">Click for details →</span>
+                    )}
+                    <span className={`text-sm font-medium ${getStatusColor(scan.status)}`}>
+                      {scan.status === 'completed' && '✓ Complete'}
+                      {scan.status === 'failed' && '✗ Failed'}
+                      {scan.status === 'running' && (
+                        <span className="flex items-center gap-1">
+                          <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Running
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-xs text-gray-500 mb-2">
+                  <div>{scan.channel_title}</div>
+                  <div>Started: {formatDate(scan.started_at)}
+                  {scan.completed_at && ` • Completed: ${formatDate(scan.completed_at)}`}</div>
+                </div>
+
+                {scan.status === 'completed' && scan.result && (
+                  <div className="flex gap-4 text-xs text-gray-600 flex-wrap items-center">
+                    {scan.result.has_infringement !== undefined && (
+                      <span className={`px-2 py-1 rounded-full font-medium ${
+                        scan.result.has_infringement
+                          ? 'bg-red-100 text-red-700'
+                          : 'bg-green-100 text-green-700'
+                      }`}>
+                        {scan.result.has_infringement ? '⚠️ Infringement' : '✅ Clear'}
+                      </span>
+                    )}
+                    {scan.result.overall_recommendation && (
+                      <span className="px-2 py-1 bg-gray-100 rounded-full">
+                        {scan.result.overall_recommendation}
+                      </span>
+                    )}
+                    {scan.result.cost_usd !== undefined && (
+                      <span>Cost: <strong>${scan.result.cost_usd.toFixed(4)}</strong></span>
+                    )}
+                    {scan.result.ip_count !== undefined && (
+                      <span>{scan.result.ip_count} IP{scan.result.ip_count !== 1 ? 's' : ''}</span>
+                    )}
+                  </div>
+                )}
+
+                {scan.status === 'failed' && scan.error_message && (
+                  <div className="text-xs text-red-600 mt-2 bg-red-50 p-2 rounded">
+                    Error: {scan.error_message}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Infinite scroll trigger */}
+            <div ref={observerTarget} className="py-4">
+              {historyLoading && (
+                <div className="flex items-center justify-center gap-2 text-gray-500">
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Loading more...
+                </div>
+              )}
+              {!hasMoreHistory && scans.length > 0 && (
+                <p className="text-center text-gray-400 text-sm">No more scan history</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Two-Column Layout: Stats + Errors */}
@@ -373,6 +721,26 @@ export default function VisionAnalyzerPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Scan Progress Notification */}
+      <ScanProgressNotification
+        show={showProgressNotification}
+        onClose={() => setShowProgressNotification(false)}
+      />
+
+      {/* Analysis Detail Modal */}
+      {selectedScan && analysisModalOpen && selectedScan.video.vision_analysis && (
+        <AnalysisDetailModal
+          isOpen={analysisModalOpen}
+          onClose={() => {
+            setAnalysisModalOpen(false)
+            setSelectedScan(null)
+          }}
+          analysis={selectedScan.video.vision_analysis}
+          videoId={selectedScan.scan.video_id}
+          videoTitle={selectedScan.scan.video_title}
+        />
       )}
 
       {/* Confirm Dialog */}

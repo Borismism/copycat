@@ -318,11 +318,19 @@ class ResultProcessor:
             channel_ref = self.firestore.collection("channels").document(channel_id)
 
             # Always increment videos_scanned
-            # Also track clean vs infringing
-            channel_ref.update({
+            # Also track clean vs infringing (for frontend display)
+            update_data = {
                 "videos_scanned": firestore.Increment(1),
                 "last_scanned_at": firestore.SERVER_TIMESTAMP,
-            })
+            }
+
+            # Update confirmed_infringements or videos_cleared (for frontend)
+            if has_infringement:
+                update_data["confirmed_infringements"] = firestore.Increment(1)
+            else:
+                update_data["videos_cleared"] = firestore.Increment(1)
+
+            channel_ref.update(update_data)
 
             logger.info(
                 f"Updated channel {channel_id} scan stats: +1 scanned, infringement={has_infringement}"

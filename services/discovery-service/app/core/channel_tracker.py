@@ -11,14 +11,16 @@ logger = logging.getLogger(__name__)
 class ChannelTracker:
     """Tracks YouTube channels and saves metadata to Firestore."""
 
-    def __init__(self, firestore_client: firestore.Client):
+    def __init__(self, firestore_client: firestore.Client, youtube_client=None):
         """
         Initialize channel tracker.
 
         Args:
             firestore_client: Firestore client for database operations
+            youtube_client: Optional YouTubeClient for fetching channel details
         """
         self.firestore = firestore_client
+        self.youtube_client = youtube_client
         logger.info("ChannelTracker initialized")
 
     def get_or_create_profile(self, channel_id: str, channel_title: str) -> dict:
@@ -57,6 +59,22 @@ class ChannelTracker:
                     "last_seen_at": datetime.now(timezone.utc),
                     "video_count": 1,  # First video!
                 }
+
+                # Try to fetch real thumbnail from YouTube API if available
+                if self.youtube_client:
+                    try:
+                        details = self.youtube_client.get_channel_details(channel_id)
+                        if details and details.get("thumbnail_high"):
+                            channel_data["thumbnail_url"] = details.get("thumbnail_high")
+                            channel_data["subscriber_count"] = details.get("subscriber_count", 0)
+                            channel_data["video_count"] = details.get("video_count", 0)
+                            logger.info(f"📺 Fetched thumbnail for {channel_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch channel thumbnail: {e}")
+                        # Continue without thumbnail
+                else:
+                    logger.debug(f"No youtube_client available for channel {channel_id}")
+
                 doc_ref.set(channel_data)
                 logger.info(f"📺 Created channel: {channel_id} ({channel_title}) with 1 video")
                 return channel_data

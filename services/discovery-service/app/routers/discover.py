@@ -14,6 +14,7 @@ from ..core.channel_tracker import ChannelTracker
 from ..core.discovery_engine import DiscoveryEngine
 from ..core.quota_manager import QuotaManager
 from ..core.search_randomizer import SearchRandomizer
+from ..core.search_history import SearchHistory
 from ..core.video_processor import VideoProcessor
 from ..core.youtube_client import YouTubeClient
 from ..models import DiscoveryStats
@@ -50,13 +51,17 @@ def get_youtube_client() -> YouTubeClient:
 def get_video_processor(
     firestore_client: firestore.Client = Depends(get_firestore_client),
     pubsub_publisher: pubsub_v1.PublisherClient = Depends(get_pubsub_publisher),
+    youtube_client: YouTubeClient = Depends(get_youtube_client),
 ) -> VideoProcessor:
     """Get video processor."""
     topic_path = pubsub_publisher.topic_path(
         settings.gcp_project_id, settings.pubsub_topic_discovered_videos
     )
-    # Create channel tracker to save channel metadata
-    channel_tracker = ChannelTracker(firestore_client=firestore_client)
+    # Create channel tracker to save channel metadata (uses YouTube API for thumbnails)
+    channel_tracker = ChannelTracker(
+        firestore_client=firestore_client,
+        youtube_client=youtube_client
+    )
 
     return VideoProcessor(
         firestore_client=firestore_client,
@@ -93,11 +98,19 @@ def get_search_randomizer(
     return _search_randomizer_cache
 
 
+def get_search_history(
+    firestore_client: firestore.Client = Depends(get_firestore_client),
+) -> SearchHistory:
+    """Get search history tracker."""
+    return SearchHistory(firestore_client=firestore_client)
+
+
 def get_discovery_engine(
     youtube_client: YouTubeClient = Depends(get_youtube_client),
     video_processor: VideoProcessor = Depends(get_video_processor),
     quota_manager: QuotaManager = Depends(get_quota_manager),
     search_randomizer: SearchRandomizer = Depends(get_search_randomizer),
+    search_history: SearchHistory = Depends(get_search_history),
 ) -> DiscoveryEngine:
     """Get discovery engine."""
     return DiscoveryEngine(
@@ -105,6 +118,7 @@ def get_discovery_engine(
         video_processor=video_processor,
         quota_manager=quota_manager,
         search_randomizer=search_randomizer,
+        search_history=search_history,
     )
 
 
@@ -117,6 +131,7 @@ def get_discovery_engine(
 async def discover(
     max_quota: int = 10_000,  # Full daily quota by default
     engine: DiscoveryEngine = Depends(get_discovery_engine),
+    firestore_client: firestore.Client = Depends(get_firestore_client),
 ) -> DiscoveryStats:
     """
     Run smart query-based discovery.
@@ -138,12 +153,58 @@ async def discover(
     """
     logger.info(f"Starting smart discovery with max_quota={max_quota}")
 
+    # Create discovery history entry
+    import uuid
+    from datetime import datetime, timezone
+
+    run_id = str(uuid.uuid4())
+    history_entry = {
+        "run_id": run_id,
+        "status": "running",
+        "max_quota": max_quota,
+        "started_at": firestore.SERVER_TIMESTAMP,
+    }
+
+    try:
+        firestore_client.collection("discovery_history").document(run_id).set(history_entry)
+        logger.info(f"Created discovery history entry: {run_id}")
+    except Exception as e:
+        logger.warning(f"Failed to create discovery history: {e}")
+
     try:
         stats = await engine.discover(max_quota=max_quota)
+
+        # Update history with results
+        try:
+            firestore_client.collection("discovery_history").document(run_id).update({
+                "status": "completed",
+                "completed_at": firestore.SERVER_TIMESTAMP,
+                "videos_discovered": stats.videos_discovered,
+                "videos_with_ip_match": stats.videos_with_ip_match,
+                "videos_skipped_duplicate": stats.videos_skipped_duplicate,
+                "quota_used": stats.quota_used,
+                "channels_tracked": stats.channels_tracked,
+                "duration_seconds": stats.duration_seconds,
+            })
+            logger.info(f"Updated discovery history {run_id} to completed")
+        except Exception as e:
+            logger.error(f"Failed to update discovery history: {e}")
+
         return stats
 
     except Exception as e:
         logger.error(f"Discovery failed: {e}")
+
+        # Mark as failed in history
+        try:
+            firestore_client.collection("discovery_history").document(run_id).update({
+                "status": "failed",
+                "completed_at": firestore.SERVER_TIMESTAMP,
+                "error_message": str(e),
+            })
+        except:
+            pass
+
         raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
 
 
@@ -151,47 +212,121 @@ async def discover(
 async def run_discovery_stream(
     max_quota: int = 10_000,
     engine: DiscoveryEngine = Depends(get_discovery_engine),
+    firestore_client: firestore.Client = Depends(get_firestore_client),
 ):
     """
     Run discovery with real-time SSE progress updates.
 
     Streams progress events as discovery executes queries.
     """
+    # Create discovery history entry
+    import uuid
+    from datetime import datetime, timezone
+
+    run_id = str(uuid.uuid4())
+    history_entry = {
+        "run_id": run_id,
+        "status": "running",
+        "max_quota": max_quota,
+        "started_at": firestore.SERVER_TIMESTAMP,
+    }
+
+    try:
+        firestore_client.collection("discovery_history").document(run_id).set(history_entry)
+        logger.info(f"Created discovery history entry: {run_id}")
+    except Exception as e:
+        logger.warning(f"Failed to create discovery history: {e}")
+
     async def event_generator():
         try:
+            import asyncio
+
             # Send initial status
             yield f"data: {json.dumps({'status': 'starting', 'quota': max_quota, 'message': f'🚀 Initializing discovery with {max_quota:,} quota units'})}\n\n"
 
-            # Progress callback to emit SSE events
-            async def progress_handler(data):
-                if data['type'] == 'plan':
-                    yield f"data: {json.dumps({'status': 'plan', 'message': f\"📋 Plan: {data['keywords_count']} keywords, {data['total_queries']} queries\", 'keywords': data['unique_keywords']})}\n\n"
-                    yield f"data: {json.dumps({'status': 'keywords', 'message': f\"🔑 Keywords: {', '.join(data['unique_keywords'][:5])}{'...' if len(data['unique_keywords']) > 5 else ''}\", 'all_keywords': data['unique_keywords']})}\n\n"
-                elif data['type'] == 'query_start':
-                    yield f"data: {json.dumps({'status': 'query', 'message': f\"🔍 Query {data['query_index']}/{data['total_queries']}: '{data['keyword']}' (order={data['order']}, quota={data['quota_used']:,}/{data['max_quota']:,})\", 'keyword': data['keyword'], 'order': data['order']})}\n\n"
-                elif data['type'] == 'query_result':
-                    yield f"data: {json.dumps({'status': 'result', 'message': f\"✓ '{data['keyword']}' → {data['results_count']} videos (cost: {data['quota_used']:,} units)\", 'keyword': data['keyword'], 'results': data['results_count']})}\n\n"
+            # Create queue for real-time events
+            event_queue = asyncio.Queue()
+            all_progress_events = []
 
-            # Run actual discovery with progress callback
-            progress_events = []
-            async def collect_progress(data):
-                progress_events.append(data)
+            # Define async callback that puts events in queue
+            async def progress_callback(data):
+                all_progress_events.append(data)
+                await event_queue.put(data)
 
-            stats = await engine.discover(max_quota=max_quota, progress_callback=collect_progress)
+            # Run discovery in background task
+            async def run_discovery():
+                result = await engine.discover(
+                    max_quota=max_quota,
+                    progress_callback=progress_callback
+                )
+                await event_queue.put({'type': 'done', 'stats': result})
+                return result
 
-            # Emit collected progress events
-            for event_data in progress_events:
-                async for event in progress_handler(event_data):
-                    yield event
+            discovery_task = asyncio.create_task(run_discovery())
+
+            # Stream events as they arrive in real-time
+            while True:
+                try:
+                    # Wait for next event with timeout
+                    data = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+
+                    if data['type'] == 'done':
+                        # Discovery finished
+                        stats = data['stats']
+                        break
+                    elif data['type'] == 'plan':
+                        msg1 = f"📋 Plan: {data['keywords_count']} keywords, {data['total_queries']} queries"
+                        yield f"data: {json.dumps({'status': 'plan', 'message': msg1, 'keywords': data['unique_keywords']})}\n\n"
+
+                        kw_list = ', '.join(data['unique_keywords'])
+                        msg2 = f"🔑 Keywords: {kw_list}"
+                        yield f"data: {json.dumps({'status': 'keywords', 'message': msg2, 'all_keywords': data['unique_keywords']})}\n\n"
+                    elif data['type'] == 'query_start':
+                        msg = f"🔍 Query {data['query_index']}/{data['total_queries']}: '{data['keyword']}' (order={data['order']}, quota={data['quota_used']:,}/{data['max_quota']:,})"
+                        yield f"data: {json.dumps({'status': 'query', 'message': msg, 'keyword': data['keyword'], 'order': data['order']})}\n\n"
+                    elif data['type'] == 'query_result':
+                        msg = f"✓ '{data['keyword']}' → {data['results_count']} videos (cost: {data['quota_used']:,} units)"
+                        yield f"data: {json.dumps({'status': 'result', 'message': msg, 'keyword': data['keyword'], 'results': data['results_count']})}\n\n"
+                except asyncio.TimeoutError:
+                    # No event yet, check if discovery task is done
+                    if discovery_task.done():
+                        stats = await discovery_task
+                        break
+                    # Otherwise keep waiting
+                    continue
+
+            progress_events = all_progress_events
 
             # Send final results with full summary (convert pydantic model to dict)
             all_keywords = []
             query_details = []
+
+            # Get keywords from plan event
             for event in progress_events:
                 if event['type'] == 'plan':
                     all_keywords = event['unique_keywords']
-                    query_details = event.get('query_details', [])
                     break
+
+            # Collect actual query results with full details
+            for event in progress_events:
+                if event['type'] == 'query_result':
+                    # Get actual time window from event or default to ALL TIME
+                    time_window_display = 'ALL TIME'
+                    if event.get('time_window'):
+                        tw = event['time_window']
+                        start = tw['published_after'][:10] if 'published_after' in tw else '?'
+                        end = tw['published_before'][:10] if 'published_before' in tw else '?'
+                        time_window_display = f"{start} to {end}"
+
+                    query_details.append({
+                        'keyword': event['keyword'],
+                        'order': event['order'],
+                        'results_count': event.get('results_count', 0),
+                        'new_count': event.get('new_count', 0),
+                        'rediscovered_count': event.get('rediscovered_count', 0),
+                        'skipped_count': event.get('skipped_count', 0),
+                        'time_window': time_window_display
+                    })
 
             # Group queries by keyword to show what orders were used
             queries_by_keyword = {}
@@ -200,6 +335,28 @@ async def run_discovery_stream(
                 if kw not in queries_by_keyword:
                     queries_by_keyword[kw] = []
                 queries_by_keyword[kw].append(q['order'])
+
+            # Update history with completion and full details
+            try:
+                firestore_client.collection("discovery_history").document(run_id).update({
+                    "status": "completed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "videos_discovered": stats.videos_discovered,
+                    "videos_with_ip_match": stats.videos_with_ip_match,
+                    "videos_skipped_duplicate": stats.videos_skipped_duplicate,
+                    "quota_used": stats.quota_used,
+                    "channels_tracked": stats.channels_tracked,
+                    "duration_seconds": stats.duration_seconds,
+                    # Store rich details for popup modal
+                    "keywords_searched": all_keywords,
+                    "keywords_count": len(all_keywords),
+                    "all_query_details": query_details,
+                    "time_window": 'ALL TIME',
+                    "orders_used": list(set(q['order'] for q in query_details)),
+                })
+                logger.info(f"Updated discovery history {run_id} to completed with full details")
+            except Exception as hist_err:
+                logger.warning(f"Failed to update discovery history: {hist_err}")
 
             result = {
                 'status': 'complete',
@@ -220,6 +377,18 @@ async def run_discovery_stream(
 
         except Exception as e:
             logger.error(f"Discovery stream failed: {e}")
+
+            # Update history with failure
+            try:
+                firestore_client.collection("discovery_history").document(run_id).update({
+                    "status": "failed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "error_message": str(e),
+                })
+                logger.info(f"Updated discovery history {run_id} to failed")
+            except Exception as hist_err:
+                logger.warning(f"Failed to update discovery history: {hist_err}")
+
             yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(
@@ -512,4 +681,54 @@ async def get_performance_metrics(
         logger.error(f"Failed to get performance metrics: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to get performance metrics: {str(e)}"
+        )
+
+
+@router.post("/channel/{channel_id}/scan")
+async def scan_channel(
+    channel_id: str,
+    max_videos: int = 50,
+    youtube_client: YouTubeClient = Depends(get_youtube_client),
+    video_processor: VideoProcessor = Depends(get_video_processor),
+) -> dict:
+    """
+    Fetch and process videos from a specific channel.
+
+    Args:
+        channel_id: YouTube channel ID
+        max_videos: Maximum number of videos to fetch (default: 50)
+
+    Returns:
+        Statistics about discovered videos
+    """
+    logger.info(f"Scanning channel {channel_id} for up to {max_videos} videos")
+
+    try:
+        # Fetch videos from YouTube
+        videos = youtube_client.get_channel_uploads(channel_id, max_results=max_videos)
+
+        if not videos:
+            return {
+                "channel_id": channel_id,
+                "videos_found": 0,
+                "videos_new": 0,
+                "videos_updated": 0,
+                "message": "No videos found for this channel"
+            }
+
+        # Process each video
+        processed = video_processor.process_batch(videos)
+
+        return {
+            "channel_id": channel_id,
+            "videos_found": len(videos),
+            "videos_new": len(processed),
+            "videos_updated": 0,
+            "message": f"Successfully scanned {len(videos)} videos, discovered {len(processed)} new"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to scan channel {channel_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to scan channel: {str(e)}"
         )

@@ -106,10 +106,10 @@ export default function MetricsGrid({ summary, metrics }: MetricsGridProps) {
       <MetricCard
         title="Discovery Efficiency"
         value={`${efficiency} vid/unit`}
-        subtitle={`Target: >2.5 ${parseFloat(efficiency) >= 2.5 ? '✓' : '⚠️'}`}
+        subtitle={`Target: >0.5 ${parseFloat(efficiency) >= 0.5 ? '✓' : '⚠️'}`}
         icon="⚡"
         trend={
-          parseFloat(efficiency) >= 2.5
+          parseFloat(efficiency) >= 0.5
             ? { direction: 'up', value: 'Excellent' }
             : { direction: 'down', value: 'Below target' }
         }

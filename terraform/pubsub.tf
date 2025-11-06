@@ -1,50 +1,43 @@
-# PubSub Topics for the pipeline
+# PubSub Topics for the Copycat pipeline
+#
+# Pipeline flow:
+# 1. discovery-service → copycat-video-discovered → risk-analyzer-service
+# 2. risk-analyzer-service → scan-ready → vision-analyzer-service
+# 3. vision-analyzer-service → vision-feedback → risk-analyzer-service (adaptive learning)
 
-# Topic 1: Video discovered
+# Topic 1: Video discovered (discovery → risk-analyzer)
 resource "google_pubsub_topic" "video_discovered" {
   name = "copycat-video-discovered"
 
   message_retention_duration = "86600s" # 24 hours
 
   labels = {
-    environment = var.environment
-    service     = "copycat"
+    service = "copycat"
+    purpose = "video-discovery"
   }
 }
 
-# Topic 2: Chapters extracted
-resource "google_pubsub_topic" "chapters_extracted" {
-  name = "copycat-chapters-extracted"
+# Topic 2: Scan ready (risk-analyzer/api → vision-analyzer)
+resource "google_pubsub_topic" "scan_ready" {
+  name = "scan-ready"
 
-  message_retention_duration = "86600s"
+  message_retention_duration = "86600s" # 24 hours
 
   labels = {
-    environment = var.environment
-    service     = "copycat"
+    service = "copycat"
+    purpose = "vision-analysis"
   }
 }
 
-# Topic 3: Frames extracted
-resource "google_pubsub_topic" "frames_extracted" {
-  name = "copycat-frames-extracted"
+# Topic 3: Vision feedback (vision-analyzer → risk-analyzer)
+resource "google_pubsub_topic" "vision_feedback" {
+  name = "vision-feedback"
 
-  message_retention_duration = "86600s"
-
-  labels = {
-    environment = var.environment
-    service     = "copycat"
-  }
-}
-
-# Topic 4: Analysis complete
-resource "google_pubsub_topic" "analysis_complete" {
-  name = "copycat-analysis-complete"
-
-  message_retention_duration = "86600s"
+  message_retention_duration = "86600s" # 24 hours
 
   labels = {
-    environment = var.environment
-    service     = "copycat"
+    service = "copycat"
+    purpose = "adaptive-learning"
   }
 }
 
@@ -55,7 +48,7 @@ resource "google_pubsub_topic" "dead_letter" {
   message_retention_duration = "604800s" # 7 days
 
   labels = {
-    environment = var.environment
-    service     = "copycat"
+    service = "copycat"
+    purpose = "error-handling"
   }
 }

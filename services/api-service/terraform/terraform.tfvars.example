@@ -1,0 +1,25 @@
+# ==============================================================================
+# API SERVICE - TERRAFORM VARIABLES
+# ==============================================================================
+# Copy this file to terraform.tfvars and fill in your values
+# ==============================================================================
+
+project_id   = "your-gcp-project-id"
+region       = "europe-west4"
+environment  = "dev" # or "prod"
+service_name = "api-service"
+
+# Image from Artifact Registry (set by CI/CD)
+image_name = "europe-west4-docker.pkg.dev/your-project-id/copycat-docker/api-service:latest"
+
+# Scaling configuration
+min_instances = 1  # Keep warm for fast API responses
+max_instances = 20 # Scale to handle traffic
+
+# Resource limits
+cpu    = "1"
+memory = "512Mi"
+
+# Request configuration
+timeout_seconds = 60  # 1 minute for API requests
+concurrency     = 80  # Default Cloud Run concurrency

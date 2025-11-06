@@ -75,43 +75,119 @@ class VideoRiskCalculator:
         """
         Factor 1: IP character match quality (0-25 points).
 
-        Strong keyword matches = likely infringement.
+        CRITICAL: Check if keywords from IP config actually appear in title/description.
+        All words in a keyword phrase must be present (order doesn't matter).
 
         Scoring:
-        - 0 matches: 0 pts
-        - 1 exact match: 15 pts
-        - 2+ exact matches: 20 pts
-        - High priority IP (Superman, Batman, etc): +5 pts
-        - AI generation keywords in title/desc: +5 pts
+        - NO keyword matches found: 0 pts (false positive from IP matching)
+        - Partial keyword match (character only): 5 pts
+        - 1 full keyword match (all words present): 15 pts
+        - 2+ full keyword matches: 20 pts
+        - AI tool keywords present (sora, runway, kling, etc): +5 pts (max 25)
+
+        Examples:
+        - "superman ai" matches if both "superman" AND "ai" appear
+        - "batman sora" matches if both "batman" AND "sora" appear
+        - "the flash movie ai" matches if "the", "flash", "movie", "ai" all appear
         """
         matched_ips = video.get("matched_ips", [])
         title = video.get("title", "").lower()
         description = video.get("description", "").lower()
+        combined_text = f"{title} {description}"
 
-        if len(matched_ips) == 0:
-            base = 0
-        elif len(matched_ips) == 1:
-            base = 15
+        # Load IP configs to get search keywords
+        ip_config_keywords = self._load_ip_keywords(matched_ips)
+
+        if len(ip_config_keywords) == 0:
+            # No IP matched or no keywords in config
+            return 0
+
+        # Check how many keyword phrases have ALL words present
+        full_matches = 0
+        partial_matches = 0
+
+        for keyword_phrase in ip_config_keywords:
+            words = keyword_phrase.lower().split()
+
+            # Check if ALL words in the phrase appear as WHOLE WORDS in title+description
+            # Use word boundary checking to avoid false positives (e.g., "ai" in "gains")
+            import re
+
+            def is_whole_word_match(text, word):
+                """Check if word appears as a whole word (not substring)."""
+                pattern = r'\b' + re.escape(word) + r'\b'
+                return bool(re.search(pattern, text))
+
+            if all(is_whole_word_match(combined_text, word) for word in words):
+                full_matches += 1
+            # Check if at least one word appears (partial match)
+            elif any(is_whole_word_match(combined_text, word) for word in words):
+                partial_matches += 1
+
+        # Base score from keyword matches
+        if full_matches >= 2:
+            base = 20  # Multiple strong matches
+        elif full_matches >= 1:
+            base = 15  # One strong match
+        elif partial_matches > 0:
+            base = 5   # Only partial matches (weak signal)
         else:
-            base = 20
+            base = 0   # No matches (false positive)
 
-        # High priority characters bonus
-        high_priority_chars = ["superman", "batman", "wonder woman", "justice league"]
-        has_high_priority = any(
-            char.lower() in str(matched_ips).lower()
-            for char in high_priority_chars
-        )
-        priority_bonus = 5 if has_high_priority else 0
+        # AI tool bonus (sora, runway, kling, pika, luma, veo, minimax)
+        # Use whole word matching for single-word tools, phrase matching for multi-word
+        import re
+        ai_tools = ["sora", "runway", "kling", "pika", "luma", "veo", "minimax", "ai generated", "ai movie"]
+        has_ai_tool = False
 
-        # AI generation keywords
-        ai_keywords = [
-            "ai generated", "sora", "runway", "kling", "pika",
-            "ai movie", "ai video", "luma", "minimax"
-        ]
-        has_ai_keyword = any(kw in title or kw in description for kw in ai_keywords)
-        ai_bonus = 5 if has_ai_keyword else 0
+        for tool in ai_tools:
+            if " " in tool:
+                # Multi-word phrase - check if all words present
+                tool_words = tool.split()
+                if all(re.search(r'\b' + re.escape(word) + r'\b', combined_text) for word in tool_words):
+                    has_ai_tool = True
+                    break
+            else:
+                # Single word - use word boundary
+                if re.search(r'\b' + re.escape(tool) + r'\b', combined_text):
+                    has_ai_tool = True
+                    break
 
-        return min(25, base + priority_bonus + ai_bonus)
+        ai_bonus = 5 if has_ai_tool else 0
+
+        return min(25, base + ai_bonus)
+
+    def _load_ip_keywords(self, matched_ips: list[str]) -> list[str]:
+        """
+        Load search keywords for matched IPs from config.
+
+        In production, this would fetch from IP config.
+        For now, return hardcoded keywords for dc-universe.
+
+        Args:
+            matched_ips: List of IP config IDs (e.g., ["dc-universe"])
+
+        Returns:
+            List of search keyword phrases
+        """
+        # TODO: Fetch from IP config API dynamically
+        # For now, hardcode dc-universe keywords
+        if "dc-universe" in matched_ips:
+            return [
+                "superman ai", "batman ai", "wonder woman ai", "the flash ai",
+                "aquaman ai", "green lantern ai", "cyborg ai", "joker ai",
+                "harley quinn ai", "lex luthor ai", "justice league ai",
+                "superman sora", "batman sora", "wonder woman sora",
+                "superman runway", "batman runway", "wonder woman runway",
+                "superman kling", "batman kling", "wonder woman kling",
+                "superman pika", "batman pika", "wonder woman pika",
+                "superman luma", "batman luma", "wonder woman luma",
+                "superman veo", "batman veo", "wonder woman veo",
+                "batman movie ai", "superman movie ai", "wonder woman movie ai",
+                "batman movie sora", "superman movie sora",
+            ]
+
+        return []
 
     def _calculate_view_count_score(self, video: dict) -> int:
         """

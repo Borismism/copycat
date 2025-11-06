@@ -1,21 +1,28 @@
+# ==============================================================================
+# DISCOVERY SERVICE - TERRAFORM VARIABLES
+# ==============================================================================
+
 variable "project_id" {
-  description = "GCP project ID"
+  description = "GCP Project ID"
   type        = string
 }
 
 variable "region" {
-  description = "GCP region"
+  description = "GCP Region for Cloud Run"
   type        = string
   default     = "europe-west4"
 }
 
-variable "environment" {
-  description = "Environment (dev, prod)"
+variable "scheduler_region" {
+  description = "GCP Region for Cloud Scheduler (must be different from Cloud Run)"
   type        = string
-  validation {
-    condition     = contains(["dev", "prod"], var.environment)
-    error_message = "Environment must be either 'dev' or 'prod'."
-  }
+  default     = "europe-west1"
+}
+
+variable "environment" {
+  description = "Environment (dev/prod)"
+  type        = string
+  default     = "dev"
 }
 
 variable "service_name" {
@@ -25,10 +32,11 @@ variable "service_name" {
 }
 
 variable "image_name" {
-  description = "Docker image name with tag"
+  description = "Docker image URL from Artifact Registry"
   type        = string
 }
 
+# Scaling configuration
 variable "min_instances" {
   description = "Minimum number of instances"
   type        = number
@@ -38,13 +46,14 @@ variable "min_instances" {
 variable "max_instances" {
   description = "Maximum number of instances"
   type        = number
-  default     = 10
+  default     = 5
 }
 
+# Resource limits
 variable "cpu" {
-  description = "CPU allocation (1000m = 1 vCPU)"
+  description = "CPU allocation"
   type        = string
-  default     = "1000m"
+  default     = "1"
 }
 
 variable "memory" {
@@ -53,14 +62,41 @@ variable "memory" {
   default     = "512Mi"
 }
 
+# Request configuration
 variable "timeout_seconds" {
   description = "Request timeout in seconds"
   type        = number
-  default     = 300
+  default     = 1800 # 30 minutes for full discovery run
 }
 
 variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
-  default     = 80
+  default     = 1 # Run one discovery at a time
+}
+
+# YouTube API Configuration
+variable "youtube_daily_quota" {
+  description = "YouTube API daily quota limit (units)"
+  type        = string
+  default     = "10000" # Default quota
+}
+
+variable "youtube_default_region" {
+  description = "Default region for YouTube API queries"
+  type        = string
+  default     = "US"
+}
+
+# Cloud Scheduler Configuration
+variable "discovery_schedule" {
+  description = "Cron schedule for discovery runs"
+  type        = string
+  default     = "0 * * * *" # Every hour at minute 0
+}
+
+variable "hourly_quota_budget" {
+  description = "YouTube API quota budget per hour (daily quota / 24)"
+  type        = number
+  default     = 417 # 10,000 / 24 ≈ 417
 }

@@ -107,6 +107,7 @@ async def trigger_analysis(request: TriggerAnalysisRequest):
         data = doc.to_dict()
 
         # Build VideoMetadata
+        matched_ips = data.get("matched_ips", [])
         video_metadata = VideoMetadata(
             video_id=request.video_id,
             youtube_url=f"https://youtube.com/watch?v={request.video_id}",
@@ -117,14 +118,37 @@ async def trigger_analysis(request: TriggerAnalysisRequest):
             channel_title=data.get("channel_title", "Unknown"),
             risk_score=data.get("risk_score", 50.0),
             risk_tier=data.get("risk_tier", "MEDIUM"),
-            matched_characters=data.get("matched_ips", []),
+            matched_characters=matched_ips,
+            matched_ips=matched_ips,
             discovered_at=data.get("discovered_at") or datetime.now(),
             last_risk_update=data.get("last_risk_update") or data.get("discovered_at") or datetime.now(),
         )
 
-        # Analyze video
-        logger.info(f"Triggering manual analysis for video {request.video_id}")
-        result = await worker.video_analyzer.analyze_video(video_metadata, queue_size=1)
+        # Load IP configs (same logic as worker.py)
+        if not matched_ips:
+            logger.info(f"No matched_ips for video {request.video_id}. Loading ALL IP configs.")
+            configs = worker.config_loader.get_all_configs()
+            if not configs:
+                raise HTTPException(status_code=500, detail="No IP configs available in system")
+        else:
+            logger.info(f"Loading configs for matched IPs: {matched_ips}")
+            configs = []
+            for ip_id in matched_ips:
+                config = worker.config_loader.get_config(ip_id)
+                if config:
+                    configs.append(config)
+                else:
+                    logger.error(f"Config not found for IP: {ip_id}")
+
+            if not configs:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"No valid configs found for matched_ips={matched_ips}"
+                )
+
+        # Analyze video with configs
+        logger.info(f"Triggering manual analysis for video {request.video_id} with {len(configs)} IP configs")
+        result = await worker.video_analyzer.analyze_video(video_metadata, configs=configs, queue_size=1)
 
         return TriggerAnalysisResponse(
             success=True,
@@ -294,6 +318,7 @@ async def trigger_batch_scan(request: BatchScanRequest):
         # Check budget and calculate max affordable videos
         budget_remaining = worker.budget_manager.get_remaining_budget()
         avg_cost_per_video = 0.008  # Average $0.008 per video
+        firestore_client = firestore.Client(project=worker.settings.gcp_project_id)
 
         if not request.force:
             # Calculate how many videos we can afford
@@ -317,7 +342,6 @@ async def trigger_batch_scan(request: BatchScanRequest):
 
         # Query Firestore for ALL videos needing analysis (discovered OR failed)
         # Process from highest to lowest priority
-        firestore_client = firestore.Client(project=worker.settings.gcp_project_id)
         videos_ref = firestore_client.collection(worker.settings.firestore_videos_collection)
 
         # Fetch all discovered videos (need first scan)

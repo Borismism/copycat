@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { videosAPI } from '../api/videos'
 import { channelsAPI } from '../api/channels'
 import AnalysisDetailModal from '../components/AnalysisDetailModal'
 import ScanProgressModal from '../components/ScanProgressModal'
 import ActiveScansOverlay from '../components/ActiveScansOverlay'
+import ScanProgressNotification from '../components/ScanProgressNotification'
 import type { VideoMetadata, VideoStatus, ChannelProfile, VisionAnalysis } from '../types'
 
 type SortOption = {
@@ -25,6 +26,7 @@ const SORT_OPTIONS: SortOption[] = [
 
 export default function VideoListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoMetadata[]>([])
   const [channels, setChannels] = useState<ChannelProfile[]>([])
   const [ipConfigs, setIpConfigs] = useState<any[]>([])
@@ -38,6 +40,8 @@ export default function VideoListPage() {
   const [analysisModalOpen, setAnalysisModalOpen] = useState(false)
   const [selectedAnalysis, setSelectedAnalysis] = useState<{ video: VideoMetadata; analysis: VisionAnalysis } | null>(null)
   const [scanningInProgress, setScanningInProgress] = useState<Set<string>>(new Set())
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false)
+  const [showProgressNotification, setShowProgressNotification] = useState(false)
 
   // Filters
   const [channelFilter, setChannelFilter] = useState<string>(searchParams.get('channel') || '')
@@ -195,6 +199,8 @@ export default function VideoListPage() {
     try {
       // Trigger the scan via API
       await videosAPI.scanVideo(video.video_id)
+      // Show progress notification
+      setShowProgressNotification(true)
       // ActiveScansOverlay will automatically pick up the processing video
     } catch (error) {
       console.error('Failed to start scan:', error)
@@ -227,9 +233,35 @@ export default function VideoListPage() {
   return (
     <>
     {/* Header */}
-    <div className="mb-6">
-      <h2 className="text-2xl font-bold text-gray-900">Video Library</h2>
-      <p className="text-gray-600">{total} videos discovered</p>
+    <div className="mb-6 flex items-center justify-between">
+      <div>
+        <h2 className="text-2xl font-bold text-gray-900">Video Library</h2>
+        <p className="text-gray-600">{total} videos discovered</p>
+      </div>
+
+      <div className="flex items-center gap-3">
+        {/* Scan History Button */}
+        <button
+          onClick={() => navigate('/dashboards/vision')}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Scan History
+        </button>
+
+        {/* Filter Toggle Button */}
+        <button
+          onClick={() => setFilterPanelOpen(!filterPanelOpen)}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:scale-95 transition-all"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+          </svg>
+          Filters {activeFiltersCount > 0 && `(${activeFiltersCount})`}
+        </button>
+      </div>
     </div>
 
     {/* Video Grid - Full width, not affected by filter */}
@@ -515,105 +547,141 @@ export default function VideoListPage() {
       </button>
     </div>
 
-    {/* Filter Panel - Fixed position in extra space on the right */}
-    <div className="hidden 2xl:block fixed w-64" style={{ right: 'calc((100vw - 1400px) / 2 - 255px)', top: '240px' }}>
-      <div className="space-y-6">
-        {/* Sort Section */}
-        <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4">
-          <label className="block text-xs font-bold text-gray-900 uppercase tracking-wider mb-3">
-            Sort By
-          </label>
-          <select
-            value={`${sortBy}:${sortDesc}`}
-            onChange={(e) => {
-              const option = SORT_OPTIONS.find(
-                (opt) => `${opt.field}:${opt.desc}` === e.target.value
-              )
-              if (option) handleSortChange(option)
-            }}
-            className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+    {/* Filter Panel - Slide-in overlay (all screen sizes) */}
+    <>
+      {/* Backdrop overlay */}
+      {filterPanelOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40"
+          onClick={() => setFilterPanelOpen(false)}
+        />
+      )}
+
+      {/* Filter Panel */}
+      <div className={`
+        fixed z-50 bg-white shadow-2xl transition-transform duration-300 ease-in-out
+        ${filterPanelOpen ? 'translate-x-0' : 'translate-x-full'}
+        top-0 right-0 h-full w-80 overflow-y-auto
+      `}>
+        {/* Header with Close Button */}
+        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-gray-900">Filters & Sort</h3>
+          <button
+            onClick={() => setFilterPanelOpen(false)}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            {SORT_OPTIONS.map((opt) => (
-              <option key={`${opt.field}:${opt.desc}`} value={`${opt.field}:${opt.desc}`}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
-        {/* Filter Section */}
-        <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 space-y-4">
-          {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b">
-            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Filters</h3>
-            {activeFiltersCount > 0 && (
-              <button
-                onClick={clearFilters}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+        <div className="space-y-6 p-4">
+          {/* Sort Section */}
+          <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4">
+            <label className="block text-xs font-bold text-gray-900 uppercase tracking-wider mb-3">
+              Sort By
+            </label>
+            <select
+              value={`${sortBy}:${sortDesc}`}
+              onChange={(e) => {
+                const option = SORT_OPTIONS.find(
+                  (opt) => `${opt.field}:${opt.desc}` === e.target.value
+                )
+                if (option) handleSortChange(option)
+              }}
+              className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            >
+              {SORT_OPTIONS.map((opt) => (
+                <option key={`${opt.field}:${opt.desc}`} value={`${opt.field}:${opt.desc}`}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filter Section */}
+          <div className="bg-white rounded-lg shadow-md border border-gray-200 p-4 space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b">
+              <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Filters</h3>
+              {activeFiltersCount > 0 && (
+                <button
+                  onClick={clearFilters}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  Clear ({activeFiltersCount})
+                </button>
+              )}
+            </div>
+
+            {/* IP Config Filter */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                IP Configuration
+              </label>
+              <select
+                value={ipConfigFilter}
+                onChange={(e) => handleFilterChange('ip_config', e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
               >
-                Clear ({activeFiltersCount})
-              </button>
-            )}
+                <option value="">All IPs ({ipConfigs.length})</option>
+                {ipConfigs.map((config) => (
+                  <option key={config.id} value={config.id}>
+                    {config.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Channel Filter */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Channel
+              </label>
+              <select
+                value={channelFilter}
+                onChange={(e) => handleFilterChange('channel', e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All channels ({channels.length})</option>
+                {channels.map((channel) => (
+                  <option key={channel.channel_id} value={channel.channel_id}>
+                    {channel.channel_title} ({channel.total_videos_found})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Status
+              </label>
+              <select
+                value={statusFilter}
+                onChange={(e) => handleFilterChange('status', e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All statuses</option>
+                <option value="discovered">Discovered</option>
+                <option value="processing">Processing</option>
+                <option value="analyzed">Analyzed</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
           </div>
 
-          {/* IP Config Filter */}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              IP Configuration
-            </label>
-            <select
-              value={ipConfigFilter}
-              onChange={(e) => handleFilterChange('ip_config', e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All IPs ({ipConfigs.length})</option>
-              {ipConfigs.map((config) => (
-                <option key={config.id} value={config.id}>
-                  {config.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Channel Filter */}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              Channel
-            </label>
-            <select
-              value={channelFilter}
-              onChange={(e) => handleFilterChange('channel', e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All channels ({channels.length})</option>
-              {channels.map((channel) => (
-                <option key={channel.channel_id} value={channel.channel_id}>
-                  {channel.channel_title} ({channel.total_videos_found})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status Filter */}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1.5">
-              Status
-            </label>
-            <select
-              value={statusFilter}
-              onChange={(e) => handleFilterChange('status', e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">All statuses</option>
-              <option value="discovered">Discovered</option>
-              <option value="processing">Processing</option>
-              <option value="analyzed">Analyzed</option>
-              <option value="failed">Failed</option>
-            </select>
-          </div>
+          {/* Apply Button */}
+          <button
+            onClick={() => setFilterPanelOpen(false)}
+            className="w-full px-4 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 active:scale-95 transition-all"
+          >
+            Apply Filters
+          </button>
         </div>
       </div>
-    </div>
+    </>
 
     {/* Modals and Overlays (outside main layout) */}
     {/* Active Scans Overlay (bottom-right) - shows ALL processing videos */}
@@ -632,6 +700,12 @@ export default function VideoListPage() {
         onClose={() => setModalVideoId(null)}
       />
     )}
+
+    {/* Scan Progress Notification */}
+    <ScanProgressNotification
+      show={showProgressNotification}
+      onClose={() => setShowProgressNotification(false)}
+    />
 
     {/* Analysis Detail Modal */}
     {selectedAnalysis && (

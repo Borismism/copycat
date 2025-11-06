@@ -360,6 +360,58 @@ class YouTubeClient:
             logger.error(f"YouTube API error searching similar videos: {e}")
             raise
 
+    def get_channel_details(self, channel_id: str) -> dict[str, Any] | None:
+        """
+        Get detailed information about a channel.
+
+        Args:
+            channel_id: YouTube channel ID
+
+        Returns:
+            Channel details dictionary with thumbnail URLs, or None if not found
+
+        Quota Cost: 1 unit
+        """
+        youtube = self._build_youtube_service()
+
+        try:
+            request = youtube.channels().list(
+                part="snippet,statistics,brandingSettings",
+                id=channel_id
+            )
+            response = request.execute()
+
+            items = response.get("items", [])
+            if not items:
+                logger.warning(f"Channel {channel_id} not found")
+                return None
+
+            channel = items[0]
+
+            # Extract thumbnail URLs (multiple sizes available)
+            thumbnails = channel.get("snippet", {}).get("thumbnails", {})
+
+            result = {
+                "channel_id": channel_id,
+                "title": channel.get("snippet", {}).get("title", ""),
+                "description": channel.get("snippet", {}).get("description", ""),
+                "custom_url": channel.get("snippet", {}).get("customUrl", ""),
+                "published_at": channel.get("snippet", {}).get("publishedAt", ""),
+                "thumbnail_default": thumbnails.get("default", {}).get("url", ""),
+                "thumbnail_medium": thumbnails.get("medium", {}).get("url", ""),
+                "thumbnail_high": thumbnails.get("high", {}).get("url", ""),
+                "subscriber_count": int(channel.get("statistics", {}).get("subscriberCount", 0)),
+                "video_count": int(channel.get("statistics", {}).get("videoCount", 0)),
+                "view_count": int(channel.get("statistics", {}).get("viewCount", 0)),
+            }
+
+            logger.info(f"Fetched channel details: {result['title']} ({result['subscriber_count']} subscribers)")
+            return result
+
+        except HttpError as e:
+            logger.error(f"YouTube API error fetching channel details: {e}")
+            return None
+
     def search_channel_videos(
         self,
         channel_id: str,

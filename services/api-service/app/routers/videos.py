@@ -127,11 +127,16 @@ async def scan_video(video_id: str):
     Returns:
         Success message
     """
+    from datetime import datetime, timezone
+
     try:
         # Get video metadata
         video = await firestore_client.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
+
+        # NOTE: scan_history entry will be created by vision-analyzer worker
+        # No need to create it here - avoids duplicates
 
         # Build scan message
         scan_message = {
