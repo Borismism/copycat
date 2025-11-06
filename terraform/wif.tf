@@ -38,34 +38,10 @@ resource "google_service_account" "github_actions_deployer" {
   description  = "Service account used by GitHub Actions to deploy Copycat services"
 }
 
-# Grant deployer permissions
-resource "google_project_iam_member" "deployer_run_admin" {
+# Grant deployer permissions (Owner role for full IAM management)
+resource "google_project_iam_member" "deployer_owner" {
   project = var.project_id
-  role    = "roles/run.admin"
-  member  = "serviceAccount:${google_service_account.github_actions_deployer.email}"
-}
-
-resource "google_project_iam_member" "deployer_storage_admin" {
-  project = var.project_id
-  role    = "roles/storage.admin"
-  member  = "serviceAccount:${google_service_account.github_actions_deployer.email}"
-}
-
-resource "google_project_iam_member" "deployer_artifacts_admin" {
-  project = var.project_id
-  role    = "roles/artifactregistry.admin"
-  member  = "serviceAccount:${google_service_account.github_actions_deployer.email}"
-}
-
-resource "google_project_iam_member" "deployer_sa_user" {
-  project = var.project_id
-  role    = "roles/iam.serviceAccountUser"
-  member  = "serviceAccount:${google_service_account.github_actions_deployer.email}"
-}
-
-resource "google_project_iam_member" "deployer_cloud_build" {
-  project = var.project_id
-  role    = "roles/cloudbuild.builds.editor"
+  role    = "roles/owner"
   member  = "serviceAccount:${google_service_account.github_actions_deployer.email}"
 }
 
