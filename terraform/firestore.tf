@@ -6,7 +6,7 @@
 # ==============================================================================
 
 resource "google_firestore_database" "copycat" {
-  name        = "(default)"
+  name        = var.firestore_database
   location_id = var.region
   type        = "FIRESTORE_NATIVE"
 
@@ -77,17 +77,18 @@ resource "google_firestore_index" "videos_rescan_by_views" {
 }
 
 # Index 3: Top videos by view count
+# Single-field index - automatically created by Firestore, no need to define
 # Use case: Analytics dashboard - show most viewed videos
 # Query: .order_by("view_count", DESC).limit(100)
-resource "google_firestore_index" "videos_by_views" {
-  database   = google_firestore_database.copycat.name
-  collection = "videos"
-
-  fields {
-    field_path = "view_count"
-    order      = "DESCENDING"
-  }
-}
+# resource "google_firestore_index" "videos_by_views" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "videos"
+#
+#   fields {
+#     field_path = "view_count"
+#     order      = "DESCENDING"
+#   }
+# }
 
 # Index 4: Videos by channel and publish date
 # Use case: Channel history view, video timeline per channel
@@ -296,31 +297,32 @@ resource "google_firestore_index" "videos_recent_viral" {
 # CHANNELS COLLECTION INDEXES
 # ==============================================================================
 
+# Single-field indexes - automatically created by Firestore
 # Index 7: Channels due for scanning
 # Use case: Get channels that need to be rescanned based on tier frequency
 # Query: .where("next_scan_at", "<=", now).order_by("next_scan_at", ASC)
-resource "google_firestore_index" "channels_due_for_scan" {
-  database   = google_firestore_database.copycat.name
-  collection = "channels"
-
-  fields {
-    field_path = "next_scan_at"
-    order      = "ASCENDING"
-  }
-}
+# resource "google_firestore_index" "channels_due_for_scan" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "channels"
+#
+#   fields {
+#     field_path = "next_scan_at"
+#     order      = "ASCENDING"
+#   }
+# }
 
 # Index 8: Channels by risk score
 # Use case: Prioritize high-risk channels, analytics dashboard
 # Query: .where("risk_score", ">=", 50).order_by("risk_score", DESC)
-resource "google_firestore_index" "channels_by_risk" {
-  database   = google_firestore_database.copycat.name
-  collection = "channels"
-
-  fields {
-    field_path = "risk_score"
-    order      = "DESCENDING"
-  }
-}
+# resource "google_firestore_index" "channels_by_risk" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "channels"
+#
+#   fields {
+#     field_path = "risk_score"
+#     order      = "DESCENDING"
+#   }
+# }
 
 # Index 9: Channels by tier and risk
 # Use case: Get all PLATINUM tier channels sorted by risk
@@ -359,18 +361,19 @@ resource "google_firestore_index" "channels_by_infringement_rate" {
   }
 }
 
+# Single-field index - automatically created by Firestore
 # Index 10b: Channels needing deep scan
 # Use case: Find channels that haven't had deep scan yet
 # Query: .where("deep_scan_completed", "==", False).limit(50)
-resource "google_firestore_index" "channels_needing_deep_scan" {
-  database   = google_firestore_database.copycat.name
-  collection = "channels"
-
-  fields {
-    field_path = "deep_scan_completed"
-    order      = "ASCENDING"
-  }
-}
+# resource "google_firestore_index" "channels_needing_deep_scan" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "channels"
+#
+#   fields {
+#     field_path = "deep_scan_completed"
+#     order      = "ASCENDING"
+#   }
+# }
 
 # ==============================================================================
 # KEYWORD_SCAN_STATE COLLECTION INDEXES
@@ -417,19 +420,20 @@ resource "google_firestore_index" "keywords_by_effectiveness" {
 # DISCOVERY_METRICS COLLECTION INDEXES
 # ==============================================================================
 
+# Single-field index - automatically created by Firestore
 # Index 13: Metrics by timestamp (time-series analytics)
 # Use case: Get metrics for date range, performance dashboards
 # Query: .where("timestamp", ">=", start).where("timestamp", "<=", end)
 #        .order_by("timestamp", DESC)
-resource "google_firestore_index" "discovery_metrics_by_time" {
-  database   = google_firestore_database.copycat.name
-  collection = "discovery_metrics"
-
-  fields {
-    field_path = "timestamp"
-    order      = "DESCENDING"
-  }
-}
+# resource "google_firestore_index" "discovery_metrics_by_time" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "discovery_metrics"
+#
+#   fields {
+#     field_path = "timestamp"
+#     order      = "DESCENDING"
+#   }
+# }
 
 # Index 14: Metrics by efficiency (quota usage per video)
 # Use case: Track discovery efficiency over time
@@ -543,19 +547,20 @@ resource "google_firestore_index" "results_by_action" {
 # RISK SCORING INDEXES (Added for comprehensive 12-factor risk scoring system)
 # ==============================================================================
 
+# Single-field index - automatically created by Firestore
 # Index 19: Videos by scan_priority (for budget exhaustion mode)
 # Use case: Vision-analyzer queries videos sorted by scan_priority DESC
 # Query: .where("scan_priority", ">=", 30).order_by("scan_priority", DESC)
 # This enables intelligent scanning - highest priority videos scanned first
-resource "google_firestore_index" "videos_by_scan_priority" {
-  database   = google_firestore_database.copycat.name
-  collection = "videos"
-
-  fields {
-    field_path = "scan_priority"
-    order      = "DESCENDING"
-  }
-}
+# resource "google_firestore_index" "videos_by_scan_priority" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "videos"
+#
+#   fields {
+#     field_path = "scan_priority"
+#     order      = "DESCENDING"
+#   }
+# }
 
 # Index 20: Videos by priority_tier and scan_priority
 # Use case: Filter by tier (CRITICAL, HIGH, MEDIUM) then sort by priority
@@ -721,52 +726,55 @@ resource "google_firestore_index" "search_history_by_keyword_order_time" {
   }
 }
 
+# Single-field index - automatically created by Firestore
 # Index 28: Search history by searched_at (for cleanup)
 # Use case: Clean up old search history entries
 # Query: .where("searched_at", "<", cutoff).order_by("searched_at", ASC)
-resource "google_firestore_index" "search_history_by_time" {
-  database   = google_firestore_database.copycat.name
-  collection = "search_history"
-
-  fields {
-    field_path = "searched_at"
-    order      = "ASCENDING"
-  }
-}
+# resource "google_firestore_index" "search_history_by_time" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "search_history"
+#
+#   fields {
+#     field_path = "searched_at"
+#     order      = "ASCENDING"
+#   }
+# }
 
 # ==============================================================================
 # CHANNELS COLLECTION - ADDITIONAL INDEXES
 # ==============================================================================
 
+# Single-field index - automatically created by Firestore
 # Index 29: Channels by risk threshold
 # Use case: Get all channels above certain risk level
 # Query: .where("channel_risk", ">=", 50).order_by("channel_risk", DESC)
-resource "google_firestore_index" "channels_by_risk_threshold" {
-  database   = google_firestore_database.copycat.name
-  collection = "channels"
-
-  fields {
-    field_path = "channel_risk"
-    order      = "DESCENDING"
-  }
-}
+# resource "google_firestore_index" "channels_by_risk_threshold" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "channels"
+#
+#   fields {
+#     field_path = "channel_risk"
+#     order      = "DESCENDING"
+#   }
+# }
 
 # ==============================================================================
 # DISCOVERY_HISTORY COLLECTION INDEXES
 # ==============================================================================
 
+# Single-field index - automatically created by Firestore
 # Index 30: Discovery history by timestamp
 # Use case: Get recent discovery runs
 # Query: .order_by("timestamp", DESC)
-resource "google_firestore_index" "discovery_history_by_timestamp" {
-  database   = google_firestore_database.copycat.name
-  collection = "discovery_history"
-
-  fields {
-    field_path = "timestamp"
-    order      = "DESCENDING"
-  }
-}
+# resource "google_firestore_index" "discovery_history_by_timestamp" {
+#   database   = google_firestore_database.copycat.name
+#   collection = "discovery_history"
+#
+#   fields {
+#     field_path = "timestamp"
+#     order      = "DESCENDING"
+#   }
+# }
 
 # ==============================================================================
 # SCAN_HISTORY COLLECTION INDEXES

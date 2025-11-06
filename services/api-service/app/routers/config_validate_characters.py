@@ -46,7 +46,7 @@ async def validate_characters(request: ValidateCharactersRequest):
         client = genai.Client(
             vertexai=True,
             project=os.getenv("GOOGLE_CLOUD_PROJECT", "copycat-429012"),
-            location=os.getenv("GCP_REGION", "europe-west4")
+            location=os.getenv("GEMINI_LOCATION", "europe-west1")
         )
 
         # Create validation prompt

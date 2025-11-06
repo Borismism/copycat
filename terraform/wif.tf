@@ -2,7 +2,7 @@
 # Allows GitHub Actions workflows to authenticate to GCP without service account keys
 
 locals {
-  wif_pool_id = "github-pool"
+  wif_pool_id = "copycat-pool"
 }
 
 resource "google_iam_workload_identity_pool" "github_pool" {
@@ -33,8 +33,8 @@ resource "google_iam_workload_identity_pool_provider" "github_provider" {
 
 # Service Account for GitHub Actions deployments
 resource "google_service_account" "github_actions_deployer" {
-  account_id   = "github-actions-deployer"
-  display_name = "GitHub Actions Deployer"
+  account_id   = "copycat-github-deployer"
+  display_name = "Copycat GitHub Actions Deployer"
   description  = "Service account used by GitHub Actions to deploy Copycat services"
 }
 

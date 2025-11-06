@@ -92,7 +92,7 @@ export const ConfigGeneratorPage: React.FC = () => {
     setShowDeleteModal(false);
 
     try {
-      const response = await fetch(`http://localhost:8080/api/config/${selectedConfig.id}`, {
+      const response = await fetch(`/api/config/${selectedConfig.id}`, {
         method: 'DELETE',
       });
 
@@ -124,7 +124,7 @@ export const ConfigGeneratorPage: React.FC = () => {
   const loadConfigs = async () => {
     try {
       // Load from API
-      const response = await fetch('http://localhost:8080/api/config/list');
+      const response = await fetch('/api/config/list');
       if (!response.ok) {
         throw new Error('Failed to load configurations');
       }
@@ -150,7 +150,7 @@ export const ConfigGeneratorPage: React.FC = () => {
 
   const loadDeletedConfigs = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/config/list-deleted');
+      const response = await fetch('/api/config/list-deleted');
       if (!response.ok) {
         throw new Error('Failed to load deleted configurations');
       }
@@ -164,7 +164,7 @@ export const ConfigGeneratorPage: React.FC = () => {
 
   const handleRestoreConfig = async (configId: string, configName: string) => {
     try {
-      const response = await fetch(`http://localhost:8080/api/config/${configId}/restore`, {
+      const response = await fetch(`/api/config/${configId}/restore`, {
         method: 'POST',
       });
 
@@ -189,7 +189,7 @@ export const ConfigGeneratorPage: React.FC = () => {
 
   const loadConfigData = async (configId: string) => {
     try {
-      const response = await fetch('http://localhost:8080/api/config/list');
+      const response = await fetch('/api/config/list');
       if (!response.ok) {
         throw new Error('Failed to load configuration data');
       }
@@ -230,7 +230,7 @@ export const ConfigGeneratorPage: React.FC = () => {
     setGeneratedConfig(null);
 
     try {
-      const response = await fetch('http://localhost:8080/api/config/ai/generate', {
+      const response = await fetch('/api/config/ai/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -278,7 +278,7 @@ export const ConfigGeneratorPage: React.FC = () => {
     }
 
     // Otherwise, save to backend
-    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig!.id}/characters`, {
+    const response = await fetch(`/api/config/${selectedConfig!.id}/characters`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: newCharacters })
@@ -294,7 +294,7 @@ export const ConfigGeneratorPage: React.FC = () => {
 
   const suggestCharacters = async (userPrompt?: string): Promise<string[]> => {
     const currentIpName = selectedConfig?.name || generatedConfig?.name || ipName;
-    const response = await fetch('http://localhost:8080/api/config/ai/suggest-characters', {
+    const response = await fetch('/api/config/ai/suggest-characters', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -316,7 +316,7 @@ export const ConfigGeneratorPage: React.FC = () => {
       return;
     }
 
-    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig!.id}/keywords`, {
+    const response = await fetch(`/api/config/${selectedConfig!.id}/keywords`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: newKeywords })
@@ -328,7 +328,7 @@ export const ConfigGeneratorPage: React.FC = () => {
 
   const suggestKeywords = async (userPrompt?: string): Promise<string[]> => {
     const currentIpName = selectedConfig?.name || generatedConfig?.name || ipName;
-    const response = await fetch('http://localhost:8080/api/config/ai/suggest-keywords', {
+    const response = await fetch('/api/config/ai/suggest-keywords', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -350,7 +350,7 @@ export const ConfigGeneratorPage: React.FC = () => {
       return;
     }
 
-    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig!.id}/ai-patterns`, {
+    const response = await fetch(`/api/config/${selectedConfig!.id}/ai-patterns`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: newPatterns })
@@ -361,7 +361,7 @@ export const ConfigGeneratorPage: React.FC = () => {
   };
 
   const suggestAIPatterns = async (userPrompt?: string): Promise<string[]> => {
-    const response = await fetch('http://localhost:8080/api/config/ai/suggest-ai-patterns', {
+    const response = await fetch('/api/config/ai/suggest-ai-patterns', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -383,7 +383,7 @@ export const ConfigGeneratorPage: React.FC = () => {
       return;
     }
 
-    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig!.id}/visual-keywords`, {
+    const response = await fetch(`/api/config/${selectedConfig!.id}/visual-keywords`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: newKeywords })
@@ -394,7 +394,7 @@ export const ConfigGeneratorPage: React.FC = () => {
   };
 
   const suggestVisualKeywords = async (userPrompt?: string): Promise<string[]> => {
-    const response = await fetch('http://localhost:8080/api/config/ai/suggest-visual-keywords', {
+    const response = await fetch('/api/config/ai/suggest-visual-keywords', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -416,7 +416,7 @@ export const ConfigGeneratorPage: React.FC = () => {
       return;
     }
 
-    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig!.id}/video-titles`, {
+    const response = await fetch(`/api/config/${selectedConfig!.id}/video-titles`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: newTitles })
@@ -427,7 +427,7 @@ export const ConfigGeneratorPage: React.FC = () => {
   };
 
   const suggestVideoTitles = async (userPrompt?: string): Promise<string[]> => {
-    const response = await fetch('http://localhost:8080/api/config/ai/suggest-video-titles', {
+    const response = await fetch('/api/config/ai/suggest-video-titles', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -449,7 +449,7 @@ export const ConfigGeneratorPage: React.FC = () => {
       return;
     }
 
-    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig!.id}/false-positive-filters`, {
+    const response = await fetch(`/api/config/${selectedConfig!.id}/false-positive-filters`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: newFilters })
@@ -460,7 +460,7 @@ export const ConfigGeneratorPage: React.FC = () => {
   };
 
   const suggestFalsePositives = async (userPrompt?: string): Promise<string[]> => {
-    const response = await fetch('http://localhost:8080/api/config/ai/suggest-false-positive-filters', {
+    const response = await fetch('/api/config/ai/suggest-false-positive-filters', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -723,7 +723,7 @@ export const ConfigGeneratorPage: React.FC = () => {
                 onUpdate={async (newItems) => {
                   setHighPriorityKeywords(newItems);
                   if (selectedConfig) {
-                    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig.id}/high-priority-keywords`, {
+                    const response = await fetch(`/api/config/${selectedConfig.id}/high-priority-keywords`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ values: newItems })
@@ -764,7 +764,7 @@ export const ConfigGeneratorPage: React.FC = () => {
                 onUpdate={async (newItems) => {
                   setMediumPriorityKeywords(newItems);
                   if (selectedConfig) {
-                    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig.id}/medium-priority-keywords`, {
+                    const response = await fetch(`/api/config/${selectedConfig.id}/medium-priority-keywords`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ values: newItems })
@@ -805,7 +805,7 @@ export const ConfigGeneratorPage: React.FC = () => {
                 onUpdate={async (newItems) => {
                   setLowPriorityKeywords(newItems);
                   if (selectedConfig) {
-                    const response = await fetch(`http://localhost:8080/api/config/${selectedConfig.id}/low-priority-keywords`, {
+                    const response = await fetch(`/api/config/${selectedConfig.id}/low-priority-keywords`, {
                       method: 'PATCH',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ values: newItems })
@@ -1105,7 +1105,7 @@ export const ConfigGeneratorPage: React.FC = () => {
                         false_positive_filters: falsePositives,
                       };
 
-                      const response = await fetch('http://localhost:8080/api/config/ai/save', {
+                      const response = await fetch('/api/config/ai/save', {
                         method: 'POST',
                         headers: {
                           'Content-Type': 'application/json',

@@ -43,7 +43,8 @@ class ChannelRiskCalculator:
 
         # Get data
         confirmed_infringements = channel.get("confirmed_infringements", 0)
-        total_videos_scanned = channel.get("total_videos_found", 0)
+        # Use total_videos_analyzed (set by channel_updater) as fallback to total_videos_found
+        total_videos_scanned = channel.get("total_videos_analyzed", channel.get("total_videos_found", 0))
         subscriber_count = channel.get("subscriber_count", 0)
         total_views = channel.get("total_views", 0)  # Sum of view_count on all discovered videos
 

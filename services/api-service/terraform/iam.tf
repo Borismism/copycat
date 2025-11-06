@@ -38,8 +38,16 @@ resource "google_project_iam_member" "pubsub_publisher" {
 }
 
 # Allow API service to invoke discovery service
-resource "google_cloud_run_service_iam_member" "api_invoke_discovery" {
-  service  = data.terraform_remote_state.discovery_service.outputs.service_name
+resource "google_cloud_run_v2_service_iam_member" "api_invoke_discovery" {
+  name     = data.terraform_remote_state.discovery_service.outputs.service_name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.api_service.email}"
+}
+
+# Allow API service to invoke vision-analyzer service
+resource "google_cloud_run_v2_service_iam_member" "api_invoke_vision_analyzer" {
+  name     = data.terraform_remote_state.vision_analyzer_service.outputs.service_name
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.api_service.email}"

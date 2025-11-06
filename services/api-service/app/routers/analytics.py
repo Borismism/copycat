@@ -1,5 +1,7 @@
 """Analytics and reporting endpoints for homepage dashboard."""
 
+import logging
+import traceback
 from datetime import datetime, timedelta
 from typing import List
 
@@ -7,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.firestore_client import firestore_client
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -91,6 +94,8 @@ async def get_hourly_stats(hours: int = 24):
         }
 
     except Exception as e:
+        logger.error(f"Failed to get hourly stats: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get hourly stats: {str(e)}")
 
 
@@ -202,6 +207,8 @@ async def get_system_health():
         }
 
     except Exception as e:
+        logger.error(f"Failed to get system health: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get system health: {str(e)}")
 
 
@@ -225,39 +232,31 @@ async def get_performance_metrics():
         videos_analyzed = summary.get("videos_analyzed", 0)
         analysis_throughput = videos_analyzed / 24.0  # Average over 24 hours
 
-        # Budget utilization - fetch from vision analyzer service
+        # Budget utilization - fetch from Firestore
+        # Note: Direct service-to-service calls don't work in Cloud Run (not Kubernetes)
+        # Vision analyzer updates budget_tracking collection in Firestore
         try:
-            import httpx
-            # Try to fetch from vision analyzer service first
-            async with httpx.AsyncClient() as client:
-                response = await client.get("http://vision-analyzer-service:8080/admin/budget", timeout=5.0)
-                if response.status_code == 200:
-                    budget_data = response.json()
-                    total_spent = budget_data.get("total_spent_usd", 0)
-                    daily_budget = budget_data.get("daily_budget_usd", 260.0)
-                    budget_utilization = total_spent / daily_budget if daily_budget > 0 else 0
-                else:
-                    raise Exception("Vision analyzer not available")
-        except Exception as e:
-            # Fallback to Firestore
-            try:
-                today = datetime.now().strftime("%Y-%m-%d")
-                budget_doc = firestore_client.db.collection("budget_tracking").document(today).get()
-                if budget_doc.exists:
-                    budget_data = budget_doc.to_dict()
-                    total_spent = budget_data.get("total_spent_usd", 0)
-                    daily_budget = 260.0
-                    budget_utilization = total_spent / daily_budget
-                else:
-                    total_spent = 0
-                    budget_utilization = 0
-            except Exception:
+            today = datetime.now().strftime("%Y-%m-%d")
+            budget_doc = firestore_client.db.collection("budget_tracking").document(today).get()
+            if budget_doc.exists:
+                budget_data = budget_doc.to_dict()
+                total_spent = budget_data.get("total_spent_usd", 0)
+                daily_budget = 260.0
+                budget_utilization = total_spent / daily_budget
+            else:
                 total_spent = 0
                 budget_utilization = 0
+        except Exception:
+            total_spent = 0
+            budget_utilization = 0
 
-        # Queue health (pending videos) - use count aggregation for performance
-        from google.cloud.firestore_v1.aggregation import CountAggregation
-        pending_videos = firestore_client.videos_collection.where("status", "==", "discovered").count().get()[0][0].value
+        # Queue health (pending videos) - manual count (more reliable)
+        try:
+            pending_docs = firestore_client.videos_collection.where("status", "==", "discovered").stream()
+            pending_videos = sum(1 for _ in pending_docs)
+        except Exception as count_error:
+            logger.warning(f"Failed to count pending videos: {count_error}")
+            pending_videos = 0
 
         # Calculate scores (0-100)
         discovery_score = min(100, (discovery_efficiency / 0.5) * 100) if discovery_efficiency > 0 else 0
@@ -294,6 +293,8 @@ async def get_performance_metrics():
         }
 
     except Exception as e:
+        logger.error(f"Failed to get performance metrics: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {str(e)}")
 
 
@@ -374,6 +375,8 @@ async def get_recent_events(limit: int = 20):
         }
 
     except Exception as e:
+        logger.error(f"Failed to get recent events: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get recent events: {str(e)}")
 
 
@@ -437,6 +440,8 @@ async def get_character_detection_stats():
         }
 
     except Exception as e:
+        logger.error(f"Failed to get character stats: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get character stats: {str(e)}")
 
 
@@ -460,4 +465,6 @@ async def get_analytics_overview():
         }
 
     except Exception as e:
+        logger.error(f"Failed to get overview: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get overview: {str(e)}")

@@ -86,7 +86,7 @@ export default function CompactScanWidget({
     let isCompleted = false
 
     const eventSource = new EventSource(
-      `http://localhost:8080/api/videos/${videoId}/scan/stream`
+      `/api/videos/${videoId}/scan/stream`
     )
 
     eventSource.onmessage = (event) => {

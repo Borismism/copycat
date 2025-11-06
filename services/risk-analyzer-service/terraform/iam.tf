@@ -43,3 +43,22 @@ resource "google_project_iam_member" "monitoring_viewer" {
   role    = "roles/monitoring.viewer"
   member  = "serviceAccount:${google_service_account.risk_analyzer_service.email}"
 }
+
+# ==============================================================================
+# PUSH SUBSCRIPTION SERVICE ACCOUNT (Nexus pattern)
+# ==============================================================================
+
+# Dedicated service account for PubSub push subscriptions
+resource "google_service_account" "push_sa" {
+  account_id   = "${var.service_name}-push"
+  display_name = "Pub/Sub Push SA for ${var.service_name}"
+  description  = "Service account used by PubSub to push messages to Cloud Run"
+}
+
+# Grant the push SA permission to invoke this Cloud Run service
+resource "google_cloud_run_v2_service_iam_member" "run_invoker_push_sa" {
+  name     = var.service_name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.push_sa.email}"
+}

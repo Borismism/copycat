@@ -6,7 +6,7 @@
 data "terraform_remote_state" "global" {
   backend = "gcs"
   config = {
-    bucket = "${var.project_id}-terraform-state"
+    bucket = "irdeto-copycat-tf-state"
     prefix = "copycat/global-infra"
   }
 }
@@ -15,7 +15,7 @@ data "terraform_remote_state" "global" {
 data "terraform_remote_state" "api_service" {
   backend = "gcs"
   config = {
-    bucket = "${var.project_id}-terraform-state"
-    prefix = "copycat/services/api-service/${var.environment}"
+    bucket = "irdeto-copycat-tf-state"
+    prefix = "copycat/services/api-service"
   }
 }

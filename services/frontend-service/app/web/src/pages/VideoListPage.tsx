@@ -89,7 +89,7 @@ export default function VideoListPage() {
 
   const loadIpConfigs = async () => {
     try {
-      const response = await fetch('http://localhost:8080/api/config/list')
+      const response = await fetch('/api/config/list')
       if (!response.ok) throw new Error('Failed to load IP configs')
       const data = await response.json()
       setIpConfigs(data.configs)

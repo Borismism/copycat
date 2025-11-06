@@ -94,7 +94,10 @@ async def trigger_analysis(request: TriggerAnalysisRequest):
 
     try:
         # Fetch video metadata from Firestore
-        firestore_client = firestore.Client(project=worker.settings.gcp_project_id)
+        firestore_client = firestore.Client(
+            project=worker.settings.gcp_project_id,
+            database=worker.settings.firestore_database_id,
+        )
         doc_ref = firestore_client.collection(worker.settings.firestore_videos_collection).document(
             request.video_id
         )
@@ -171,13 +174,15 @@ async def get_status():
         Service status
     """
     from .. import worker
+    from ..routers import analyze
 
     return {
         "service": "vision-analyzer-service",
-        "worker_running": worker.worker_thread is not None,
+        "mode": "push_subscription",
         "components_initialized": {
-            "video_analyzer": worker.video_analyzer is not None,
-            "budget_manager": worker.budget_manager is not None,
+            "video_analyzer": analyze.video_analyzer is not None,
+            "budget_manager": analyze.budget_manager is not None,
+            "config_loader": analyze.config_loader is not None,
         },
     }
 
@@ -204,7 +209,10 @@ async def trigger_mock_analysis(request: TriggerAnalysisRequest):
 
     try:
         # Fetch video metadata from Firestore
-        firestore_client = firestore.Client(project=worker.settings.gcp_project_id)
+        firestore_client = firestore.Client(
+            project=worker.settings.gcp_project_id,
+            database=worker.settings.firestore_database_id,
+        )
         doc_ref = firestore_client.collection(worker.settings.firestore_videos_collection).document(
             request.video_id
         )
@@ -318,7 +326,10 @@ async def trigger_batch_scan(request: BatchScanRequest):
         # Check budget and calculate max affordable videos
         budget_remaining = worker.budget_manager.get_remaining_budget()
         avg_cost_per_video = 0.008  # Average $0.008 per video
-        firestore_client = firestore.Client(project=worker.settings.gcp_project_id)
+        firestore_client = firestore.Client(
+            project=worker.settings.gcp_project_id,
+            database=worker.settings.firestore_database_id,
+        )
 
         if not request.force:
             # Calculate how many videos we can afford

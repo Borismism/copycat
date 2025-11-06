@@ -71,16 +71,10 @@ export const visionAPI = {
   getConfiguration: () => api.get<GeminiConfiguration>('/vision/config'),
   updateConfiguration: (config: GeminiConfiguration) => api.put<GeminiConfiguration>('/vision/config', config),
   getAnalytics: () => api.get<VisionAnalytics>('/vision/analytics'),
-  // Call vision-analyzer-service directly (port 8083) for batch scan
-  startBatchScan: async (batch_size: number) => {
-    const response = await fetch('http://localhost:8083/admin/batch-scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: batch_size, min_priority: 0, force: false })
-    })
-    if (!response.ok) {
-      throw new Error(`Batch scan failed: ${response.statusText}`)
-    }
-    return response.json()
-  },
+  startBatchScan: (batch_size: number) =>
+    api.post<BatchScanResponse>('/vision/batch-scan', {
+      limit: batch_size,
+      min_priority: 0,
+      force: false
+    }),
 }

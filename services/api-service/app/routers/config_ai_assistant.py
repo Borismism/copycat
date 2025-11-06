@@ -400,7 +400,7 @@ async def generate_config_with_gemini(ip_info: IPBasicInfo) -> GeminiExpandedCon
     if not project:
         raise HTTPException(status_code=500, detail="GEMINI_PROJECT_ID not configured")
 
-    region = os.getenv("GCP_REGION", "us-central1")
+    region = os.getenv("GEMINI_LOCATION", "europe-west1")
 
     # Initialize Gemini client
     try:
@@ -522,7 +522,7 @@ async def call_gemini_for_suggestions(prompt: str) -> list[str]:
     if not project:
         raise HTTPException(status_code=500, detail="GEMINI_PROJECT_ID not configured")
 
-    region = os.getenv("GCP_REGION", "us-central1")
+    region = os.getenv("GEMINI_LOCATION", "europe-west1")
 
     try:
         credentials, _ = default()

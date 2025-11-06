@@ -47,6 +47,12 @@ variable "youtube_daily_quota" {
   default     = "10000"
 }
 
+variable "firestore_database" {
+  description = "Firestore database name"
+  type        = string
+  default     = "copycat"
+}
+
 variable "youtube_default_region" {
   description = "Default region for YouTube API queries"
   type        = string
@@ -77,4 +83,13 @@ variable "daily_budget_usd" {
   description = "Daily Gemini API budget in USD"
   type        = string
   default     = "260"
+}
+
+variable "environment" {
+  description = "Environment (dev or prod) - used for log levels and debug settings"
+  type        = string
+  validation {
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "Environment must be either 'dev' or 'prod'."
+  }
 }

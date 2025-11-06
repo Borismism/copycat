@@ -1,36 +1,40 @@
 # ==============================================================================
-# COPYCAT - DEVELOPMENT TERRAFORM VARIABLES
+# COPYCAT - DEVELOPMENT TERRAFORM VARIABLES (Irdeto Internal Dev)
 # ==============================================================================
-# This file contains development/staging configuration
-# Deployed to: your-dev-project-id
+# Deployed to: irdeto-copycat-internal-dev
 # ==============================================================================
 
 # GCP Project Configuration
-project_id = "your-dev-project-id"
-region     = "europe-west4"
+project_id  = "irdeto-copycat-internal-dev"
+region      = "europe-west4"
+environment = "dev"  # For log levels, debug settings, etc.
 
 # GitHub Repository (for Workload Identity Federation)
-github_repository = "your-org/copycat"
+github_repository = "Borismism/copycat"
 
 # Artifact Registry
 artifact_repo_id = "copycat-docker"
 
 # Frontend Domain & IAP
-frontend_domain      = "copycat-dev.yourcompany.com"
-iap_support_email    = "dev@yourcompany.com"
+frontend_domain      = "copycat-dev.borism.nl"
+iap_support_email    = "boris@nextnovate.com"
 iap_authorized_users = [
-  "user:dev@yourcompany.com",
-  "user:boris@yourcompany.com"
+  "user:boris@nextnovate.com",
+  "user:bartjan@nextnovate.com",
+  "user:bart@nextnovate.com"
 ]
 
-# YouTube API Configuration (dev has separate quota)
-youtube_daily_quota        = "10000"
-youtube_default_region     = "US"
+# Firestore Configuration
+firestore_database         = "copycat"  # Use copycat Firestore database
 
-# Discovery Schedule (less frequent in dev to save quota)
-discovery_schedule      = "0 */3 * * *"  # Every 3 hours
-hourly_quota_budget     = 139            # 10,000 / 72 (3-hour intervals)
+# YouTube API Configuration
+youtube_daily_quota        = "10000"  # Default quota
+youtube_default_region     = "EU"     # Europe
+
+# Discovery Schedule (every 2 hours with adaptive budget)
+discovery_schedule      = "0 */2 * * *"  # Every 2 hours
+hourly_quota_budget     = 833            # 10,000 / 12 (adaptive based on usage)
 
 # Gemini Configuration
-gemini_location         = "us-central1"
-daily_budget_usd        = "50"  # Lower budget for dev
+gemini_location         = "europe-west1"  # Belgium - Full Gemini 2.5 Flash support
+daily_budget_usd        = "5"             # €5 for demo testing

@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     # Gemini settings
     gemini_model: str = "gemini-2.5-flash"  # Latest model with video support
-    gemini_location: str = "europe-west4"  # Vertex AI region
+    gemini_location: str = "europe-west1"  # Vertex AI region (read from GEMINI_LOCATION env var)
     gemini_temperature: float = 0.2  # Low temp for consistency
     gemini_max_output_tokens: int = 40000  # Allow detailed responses (max is 65536)
 
@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     pubsub_feedback_topic: str = "vision-feedback"
 
     # Firestore
+    firestore_database_id: str = "copycat"  # Matches terraform default
     firestore_videos_collection: str = "videos"
     firestore_budget_collection: str = "budget_tracking"
 

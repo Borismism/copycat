@@ -1,1 +1,2 @@
-bucket = "tf-state-your-dev-project-id"
+bucket = "irdeto-copycat-tf-state"
+prefix = "copycat/global-infra"

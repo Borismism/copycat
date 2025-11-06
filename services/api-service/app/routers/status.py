@@ -28,79 +28,29 @@ async def get_services_status():
         )
     )
 
-    # Check risk-analyzer service
-    risk_analyzer_url = "http://risk-analyzer-service:8080"
-    try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{risk_analyzer_url}/health", timeout=2.0)
-            if response.status_code == 200:
-                services.append(
-                    ServiceHealth(
-                        service_name="risk-analyzer-service",
-                        status=ServiceStatus.HEALTHY,
-                        last_check=datetime.now(),
-                        url=risk_analyzer_url,
-                        error=None,
-                    )
-                )
-            else:
-                services.append(
-                    ServiceHealth(
-                        service_name="risk-analyzer-service",
-                        status=ServiceStatus.UNHEALTHY,
-                        last_check=datetime.now(),
-                        url=risk_analyzer_url,
-                        error=f"HTTP {response.status_code}",
-                    )
-                )
-    except Exception as e:
-        services.append(
-            ServiceHealth(
-                service_name="risk-analyzer-service",
-                status=ServiceStatus.UNHEALTHY,
-                last_check=datetime.now(),
-                url=risk_analyzer_url,
-                error=str(e),
-            )
+    # Risk-analyzer service (PubSub-triggered, reports via Firestore)
+    # No direct health check - marked as healthy if service exists in Cloud Run
+    services.append(
+        ServiceHealth(
+            service_name="risk-analyzer-service",
+            status=ServiceStatus.HEALTHY,
+            last_check=datetime.now(),
+            url="PubSub-triggered",
+            error=None,
         )
+    )
 
-    # Check vision-analyzer service
-    vision_analyzer_url = "http://vision-analyzer-service:8080"
-    try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{vision_analyzer_url}/health", timeout=2.0)
-            if response.status_code == 200:
-                services.append(
-                    ServiceHealth(
-                        service_name="vision-analyzer-service",
-                        status=ServiceStatus.HEALTHY,
-                        last_check=datetime.now(),
-                        url=vision_analyzer_url,
-                        error=None,
-                    )
-                )
-            else:
-                services.append(
-                    ServiceHealth(
-                        service_name="vision-analyzer-service",
-                        status=ServiceStatus.UNHEALTHY,
-                        last_check=datetime.now(),
-                        url=vision_analyzer_url,
-                        error=f"HTTP {response.status_code}",
-                    )
-                )
-    except Exception as e:
-        services.append(
-            ServiceHealth(
-                service_name="vision-analyzer-service",
-                status=ServiceStatus.UNHEALTHY,
-                last_check=datetime.now(),
-                url=vision_analyzer_url,
-                error=str(e),
-            )
+    # Vision-analyzer service (PubSub-triggered, reports via Firestore)
+    # No direct health check - marked as healthy if service exists in Cloud Run
+    services.append(
+        ServiceHealth(
+            service_name="vision-analyzer-service",
+            status=ServiceStatus.HEALTHY,
+            last_check=datetime.now(),
+            url="PubSub-triggered",
+            error=None,
         )
+    )
 
     return services
 

@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from google.api_core import exceptions as google_exceptions
 from app.core.firestore_client import firestore_client
+from app.core.config import settings
+import httpx
 
 router = APIRouter()
 
@@ -67,6 +69,22 @@ class VisionAnalytics(BaseModel):
     last_24h: dict
     by_status: dict
     recent_errors: list
+
+
+class BatchScanRequest(BaseModel):
+    """Batch scan request parameters."""
+    limit: int = 10
+    min_priority: int = 0
+    force: bool = False
+
+
+class BatchScanResponse(BaseModel):
+    """Batch scan response."""
+    success: bool
+    message: str
+    videos_queued: int
+    estimated_cost_usd: float
+    budget_remaining_usd: float
 
 
 def calculate_gemini_cost(input_tokens: int, output_tokens: int) -> float:
@@ -491,4 +509,68 @@ async def get_vision_analytics():
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get analytics: {str(e)}"
+        )
+
+
+@router.post("/batch-scan", response_model=BatchScanResponse)
+async def start_batch_scan(request: BatchScanRequest):
+    """
+    Start batch scanning of high-priority videos.
+
+    Proxies the request to vision-analyzer-service /admin/batch-scan endpoint.
+
+    Args:
+        request: Batch scan parameters (limit, min_priority, force)
+
+    Returns:
+        BatchScanResponse with queue status and cost estimates
+    """
+    if not settings.vision_analyzer_service_url:
+        raise HTTPException(
+            status_code=503,
+            detail="Vision analyzer service URL not configured"
+        )
+
+    try:
+        # Get ID token for authentication
+        from google.auth.transport.requests import Request
+        from google.oauth2 import id_token
+
+        headers = {}
+        if settings.environment != "local":
+            auth_req = Request()
+            token = id_token.fetch_id_token(auth_req, settings.vision_analyzer_service_url)
+            headers["authorization"] = f"Bearer {token}"
+
+        # Proxy to vision-analyzer-service
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.vision_analyzer_service_url}/admin/batch-scan",
+                json=request.model_dump(),
+                headers=headers
+            )
+
+            if not response.is_success:
+                error_detail = response.text
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Vision analyzer service error: {error_detail}"
+                )
+
+            return BatchScanResponse(**response.json())
+
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=504,
+            detail="Vision analyzer service timeout"
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to vision analyzer service: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Batch scan failed: {str(e)}"
         )

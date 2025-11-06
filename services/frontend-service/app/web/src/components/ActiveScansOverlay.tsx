@@ -14,13 +14,6 @@ interface ScanProgress {
   error_message?: string
 }
 
-interface ScanItemProgress {
-  videoId: string
-  progress: ScanProgress
-  progressPercent: number
-  processingStartTime: number | null
-}
-
 // Export the type so parent can use it
 export interface ScanItemProgress {
   videoId: string
@@ -124,7 +117,7 @@ function ScanItem({ video, scanProgress, setScanProgress, setErrorVideos, onView
   // Subscribe to SSE updates for status changes only
   useEffect(() => {
     let isCompleted = false
-    const eventSource = new EventSource(`http://localhost:8080/api/videos/${video.video_id}/scan/stream`)
+    const eventSource = new EventSource(`/api/videos/${video.video_id}/scan/stream`)
 
     eventSource.onmessage = (event) => {
       try {

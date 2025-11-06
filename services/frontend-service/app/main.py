@@ -1,16 +1,25 @@
 """Frontend Service - FastAPI proxy for React SPA with IAM authentication."""
+# Force rebuild for favicon
 
+import logging
 import os
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import id_token
 from pydantic_settings import BaseSettings
 from sse_starlette.sse import EventSourceResponse
 import httpx
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -23,6 +32,19 @@ class Settings(BaseSettings):
 settings = Settings()
 
 app = FastAPI(title="Copycat Frontend")
+
+# Global exception handler with full stack traces
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Log all unhandled exceptions with full stack trace."""
+    logger.error(
+        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+        exc_info=True
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"}
+    )
 
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
@@ -50,8 +72,8 @@ async def proxy_to_api(path: str, request: Request) -> Response:
         "content-type": request.headers.get("content-type", "application/json"),
     }
 
-    # Add IAM authentication only in production (not local)
-    if settings.environment not in ["local", "dev"]:
+    # Add IAM authentication (skip only in local development with docker-compose)
+    if settings.environment != "local":
         try:
             # Fetch service account ID token for api-service audience
             auth_req = GoogleAuthRequest()

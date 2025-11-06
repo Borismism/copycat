@@ -1,36 +1,34 @@
 # ==============================================================================
 # COPYCAT - PRODUCTION TERRAFORM VARIABLES
 # ==============================================================================
-# This file contains production configuration
-# Deployed to: your-prod-project-id
+# Fill this in when you're ready to deploy to production
 # ==============================================================================
 
 # GCP Project Configuration
-project_id = "your-prod-project-id"
+project_id = "your-prod-project-id"              # ← FILL THIS
 region     = "europe-west4"
 
 # GitHub Repository (for Workload Identity Federation)
-github_repository = "your-org/copycat"
+github_repository = "Borismism/copycat"
 
 # Artifact Registry
 artifact_repo_id = "copycat-docker"
 
 # Frontend Domain & IAP
-frontend_domain      = "copycat.yourcompany.com"
-iap_support_email    = "support@yourcompany.com"
+frontend_domain      = "copycat.borism.nl"        # ← FILL THIS
+iap_support_email    = "support@borism.nl"        # ← FILL THIS
 iap_authorized_users = [
-  "user:admin@yourcompany.com",
-  "group:copycat-admins@yourcompany.com"
+  "user:boris@nextnovate.com",                    # ← UPDATE THIS
 ]
 
 # YouTube API Configuration
-youtube_daily_quota        = "10000"  # Request increase via GCP Console
-youtube_default_region     = "US"
+youtube_daily_quota        = "10000"  # Request increase via GCP Console if needed
+youtube_default_region     = "EU"
 
-# Discovery Schedule
+# Discovery Schedule (every hour for production)
 discovery_schedule      = "0 * * * *"  # Every hour
 hourly_quota_budget     = 417          # 10,000 / 24
 
 # Gemini Configuration
-gemini_location         = "us-central1"  # Best for Gemini 2.5 Flash
-daily_budget_usd        = "260"          # €240 ≈ $260
+gemini_location         = "us-central1"
+daily_budget_usd        = "260"  # €240 ≈ $260 for full production

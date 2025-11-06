@@ -58,9 +58,66 @@ class RiskAnalyzer:
 
         logger.info("RiskAnalyzer initialized")
 
+    async def process_video_discovered(self, message_data: dict) -> None:
+        """
+        Process a newly discovered video from PubSub (async version for webhooks).
+
+        Workflow:
+        1. Extract video metadata
+        2. Calculate scan priority (Channel 40% + Video 60%)
+        3. Set initial next_scan_at based on priority tier
+        4. Update Firestore
+
+        Args:
+            message_data: Video metadata from discovery-service
+        """
+        try:
+            video_id = message_data.get("video_id", "")
+
+            logger.info(f"Processing discovered video {video_id}")
+
+            # Get video data from Firestore (discovery-service already saved it)
+            doc_ref = self.firestore.collection("videos").document(video_id)
+            doc = doc_ref.get()
+
+            if not doc.exists:
+                logger.error(f"Video {video_id} not found in Firestore")
+                return
+
+            video_data = doc.to_dict()
+
+            # Calculate comprehensive scan priority
+            priority_result = await self.priority_calculator.calculate_priority(video_data)
+
+            scan_priority = priority_result["scan_priority"]
+            priority_tier = priority_result["priority_tier"]
+            channel_risk = priority_result["channel_risk"]
+            video_risk = priority_result["video_risk"]
+
+            logger.info(
+                f"Video {video_id}: scan_priority={scan_priority}, tier={priority_tier}, "
+                f"channel_risk={channel_risk}, video_risk={video_risk}"
+            )
+
+            # Update video with scan priority (no scheduling - just priority queue)
+            doc_ref.update({
+                "scan_priority": scan_priority,
+                "priority_tier": priority_tier,
+                "channel_risk": channel_risk,
+                "video_risk": video_risk,
+                "updated_at": datetime.now(timezone.utc),
+            })
+
+            logger.info(
+                f"Video {video_id}: priority={scan_priority}, tier={priority_tier}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error processing discovered video: {e}", exc_info=True)
+
     def process_discovered_video(self, message_data: dict) -> None:
         """
-        Process a newly discovered video from PubSub.
+        Process a newly discovered video from PubSub (sync version).
 
         Workflow:
         1. Extract video metadata
@@ -246,9 +303,9 @@ class RiskAnalyzer:
             logger.error(f"Error in continuous analysis: {e}")
             return {"error": str(e)}
 
-    def process_vision_feedback(self, message_data: dict) -> None:
+    async def process_vision_feedback(self, message_data: dict) -> None:
         """
-        Process vision analysis feedback.
+        Process vision analysis feedback (async version for webhooks).
 
         When vision analyzer finds an infringement, it updates channel data.
         This triggers recalculation of ALL pending videos from that channel.
@@ -302,9 +359,7 @@ class RiskAnalyzer:
                 video_data = video_doc.to_dict()
 
                 # Recalculate priority with updated channel data
-                priority_result = asyncio.run(
-                    self.priority_calculator.calculate_priority(video_data)
-                )
+                priority_result = await self.priority_calculator.calculate_priority(video_data)
 
                 scan_priority = priority_result["scan_priority"]
                 priority_tier = priority_result["priority_tier"]

@@ -10,12 +10,9 @@ variable "region" {
 }
 
 variable "environment" {
-  description = "Environment (dev, prod)"
+  description = "Environment (dev/prod)"
   type        = string
-  validation {
-    condition     = contains(["dev", "prod"], var.environment)
-    error_message = "Environment must be either 'dev' or 'prod'."
-  }
+  default     = "dev"
 }
 
 variable "service_name" {
@@ -63,4 +60,10 @@ variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
   default     = 80
+}
+
+variable "gemini_location" {
+  description = "GCP Region for Gemini/Vertex AI"
+  type        = string
+  default     = "europe-west1"
 }

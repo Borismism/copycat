@@ -1,4 +1,4 @@
-name: Deploy Service
+name: Deploy Services and Infrastructure
 
 on:
   push:
@@ -7,10 +7,12 @@ on:
       - develop
     paths:
       - 'services/**'
+      - 'terraform/**'
+      - 'deploy.sh'
   workflow_dispatch:
     inputs:
-      service_name:
-        description: 'Service to deploy'
+      target:
+        description: 'What to deploy (service name, "infra", or "all")'
         required: true
         type: string
       environment:
@@ -21,28 +23,57 @@ on:
           - dev
           - prod
 
-env:
-  GCP_REGION: europe-west4
-
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.detect.outputs.services }}
+      deploy_infra: ${{ steps.detect.outputs.deploy_infra }}
+      environment: ${{ steps.detect.outputs.environment }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Detect changed services
+      - name: Detect changes and determine environment
         id: detect
         run: |
+          # Determine environment
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # Manual trigger - deploy specified service
-            echo "services=[\"${{ inputs.service_name }}\"]" >> $GITHUB_OUTPUT
+            ENV="${{ inputs.environment }}"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            ENV="prod"
           else
-            # Auto trigger - detect changed services
-            CHANGED_SERVICES=$(git diff --name-only HEAD^ HEAD | grep '^services/' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]')
+            ENV="dev"
+          fi
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual trigger
+            TARGET="${{ inputs.target }}"
+            if [ "$TARGET" = "infra" ]; then
+              echo "services=[]" >> $GITHUB_OUTPUT
+              echo "deploy_infra=true" >> $GITHUB_OUTPUT
+            elif [ "$TARGET" = "all" ]; then
+              echo "services=[\"api-service\",\"discovery-service\",\"risk-analyzer-service\",\"vision-analyzer-service\",\"frontend-service\"]" >> $GITHUB_OUTPUT
+              echo "deploy_infra=false" >> $GITHUB_OUTPUT
+            else
+              echo "services=[\"$TARGET\"]" >> $GITHUB_OUTPUT
+              echo "deploy_infra=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # Auto trigger - detect changed files
+            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+
+            # Check for global terraform changes
+            if echo "$CHANGED_FILES" | grep -q '^terraform/'; then
+              echo "deploy_infra=true" >> $GITHUB_OUTPUT
+            else
+              echo "deploy_infra=false" >> $GITHUB_OUTPUT
+            fi
+
+            # Detect changed services
+            CHANGED_SERVICES=$(echo "$CHANGED_FILES" | grep '^services/' | cut -d'/' -f2 | sort -u | jq -R -s -c 'split("\n")[:-1]')
             if [ "$CHANGED_SERVICES" = "[]" ] || [ -z "$CHANGED_SERVICES" ]; then
               echo "services=[]" >> $GITHUB_OUTPUT
             else
@@ -50,13 +81,10 @@ jobs:
             fi
           fi
 
-  deploy:
+  deploy-infra:
     needs: detect-changes
-    if: needs.detect-changes.outputs.services != '[]'
+    if: needs.detect-changes.outputs.deploy_infra == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
     permissions:
       contents: read
       id-token: write
@@ -73,96 +101,62 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Install UV
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
 
-      - name: Determine environment
-        id: env
+      - name: Deploy global infrastructure
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "environment=${{ inputs.environment }}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "environment=prod" >> $GITHUB_OUTPUT
-          else
-            echo "environment=dev" >> $GITHUB_OUTPUT
-          fi
+          chmod +x deploy.sh
+          ./deploy.sh infra ${{ needs.detect-changes.outputs.environment }}
 
-      - name: Generate image tag
-        id: image
+      - name: Deployment summary
         run: |
-          GIT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          IMAGE_TAG="${{ steps.env.outputs.environment }}-${GIT_SHA}-${TIMESTAMP}"
-          IMAGE_NAME="${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/docker-repo/${{ matrix.service }}:${IMAGE_TAG}"
-          echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "## 🌍 Global Infrastructure Deployed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.detect-changes.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
 
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev
+  deploy-services:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+      fail-fast: false
+    permissions:
+      contents: read
+      id-token: write
 
-      - name: Build and push image
-        run: |
-          echo "Building Docker image: ${{ steps.image.outputs.name }}"
-          docker build \
-            --platform linux/amd64 \
-            -f services/${{ matrix.service }}/Dockerfile \
-            -t ${{ steps.image.outputs.name }} \
-            services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
 
-          echo "Pushing image to Artifact Registry"
-          docker push ${{ steps.image.outputs.name }}
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
-      - name: Deploy infrastructure
-        working-directory: services/${{ matrix.service }}/terraform
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker europe-west4-docker.pkg.dev
+
+      - name: Deploy service using deploy.sh
         run: |
-          # Initialize Terraform
-          terraform init \
-            -backend-config="bucket=${{ secrets.GCP_PROJECT_ID }}-terraform-state" \
-            -backend-config="prefix=copycat/services/${{ matrix.service }}/${{ steps.env.outputs.environment }}"
-
-          # Apply infrastructure
-          terraform apply \
-            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
-            -var="region=${{ env.GCP_REGION }}" \
-            -var="environment=${{ steps.env.outputs.environment }}" \
-            -var="service_name=${{ matrix.service }}" \
-            -var="image_name=${{ steps.image.outputs.name }}" \
-            -auto-approve
-
-          # Get service URL
-          SERVICE_URL=$(terraform output -raw service_url)
-          echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_ENV
-
-      - name: Verify deployment
-        run: |
-          echo "Waiting for service to be ready..."
-          sleep 10
-
-          # Get auth token
-          TOKEN=$(gcloud auth print-identity-token)
-
-          # Health check
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TOKEN" \
-            "${{ env.SERVICE_URL }}/health" || echo "000")
-
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✅ Health check passed"
-          else
-            echo "⚠️ Health check returned HTTP $HTTP_CODE"
-            exit 1
-          fi
+          chmod +x deploy.sh
+          ./deploy.sh ${{ matrix.service }} ${{ needs.detect-changes.outputs.environment }}
 
       - name: Deployment summary
         run: |
-          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Service Deployed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Service:** ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ steps.env.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** ${{ steps.image.outputs.name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** ${{ env.SERVICE_URL }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ needs.detect-changes.outputs.environment }}" >> $GITHUB_STEP_SUMMARY

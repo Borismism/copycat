@@ -80,6 +80,9 @@ async def list_processing_videos():
     Returns list of videos that are actively being scanned by Gemini.
     Useful for showing progress indicators and allowing users to reopen progress modals.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
         # Get all videos with status = 'processing'
         from app.models import VideoStatus
@@ -97,6 +100,7 @@ async def list_processing_videos():
             "count": len(videos)
         }
     except Exception as e:
+        logger.error(f"Failed to list processing videos: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to list processing videos: {str(e)}")
 
 

@@ -13,11 +13,6 @@ output "service_account_email" {
   value       = google_service_account.discovery_service.email
 }
 
-output "environment" {
-  description = "Deployment environment"
-  value       = var.environment
-}
-
 output "image_name" {
   description = "Deployed Docker image"
   value       = var.image_name

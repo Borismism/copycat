@@ -1,13 +1,13 @@
 """FastAPI application for risk-analyzer service."""
 
 import logging
+import traceback
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .config import settings
-from .routers import admin, health
-from . import worker
+from .routers import admin, health, webhooks
 
 # Configure logging
 logging.basicConfig(
@@ -24,9 +24,23 @@ app = FastAPI(
     version=settings.version,
 )
 
+# Global exception handler with full stack traces
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Log all unhandled exceptions with full stack trace."""
+    logger.error(
+        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+        exc_info=True
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {str(exc)}"}
+    )
+
 # Include routers
 app.include_router(health.router, tags=["health"])
 app.include_router(admin.router, tags=["admin"])
+app.include_router(webhooks.router, tags=["webhooks"])
 
 
 @app.on_event("startup")
@@ -36,29 +50,10 @@ async def startup_event():
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"GCP Project: {settings.gcp_project_id}")
     logger.info(f"Region: {settings.gcp_region}")
-
-    # Start PubSub worker
-    logger.info("Starting PubSub worker...")
-    worker.start_worker()
-    logger.info("PubSub worker started")
+    logger.info("Using PubSub PUSH subscriptions via webhooks")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
     logger.info(f"Shutting down {settings.service_name}")
-
-    # Stop PubSub worker
-    logger.info("Stopping PubSub worker...")
-    worker.stop_worker()
-    logger.info("PubSub worker stopped")
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )

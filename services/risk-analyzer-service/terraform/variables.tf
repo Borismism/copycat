@@ -9,19 +9,10 @@ variable "region" {
   default     = "europe-west4"
 }
 
-variable "environment" {
-  description = "Environment (dev, prod)"
-  type        = string
-  validation {
-    condition     = contains(["dev", "prod"], var.environment)
-    error_message = "Environment must be either 'dev' or 'prod'."
-  }
-}
-
 variable "service_name" {
   description = "Service name"
   type        = string
-  default     = "discovery-service"
+  default     = "risk-analyzer-service"
 }
 
 variable "image_name" {

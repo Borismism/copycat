@@ -6,7 +6,7 @@
 data "terraform_remote_state" "global" {
   backend = "gcs"
   config = {
-    bucket = "${var.project_id}-terraform-state"
+    bucket = "irdeto-copycat-tf-state"
     prefix = "copycat/global-infra"
   }
 }
@@ -15,7 +15,16 @@ data "terraform_remote_state" "global" {
 data "terraform_remote_state" "discovery_service" {
   backend = "gcs"
   config = {
-    bucket = "${var.project_id}-terraform-state"
-    prefix = "copycat/services/discovery-service/${var.environment}"
+    bucket = "irdeto-copycat-tf-state"
+    prefix = "copycat/services/discovery-service"
+  }
+}
+
+# Get vision-analyzer-service URL from remote state
+data "terraform_remote_state" "vision_analyzer_service" {
+  backend = "gcs"
+  config = {
+    bucket = "irdeto-copycat-tf-state"
+    prefix = "copycat/services/vision-analyzer-service"
   }
 }

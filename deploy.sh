@@ -135,7 +135,7 @@ build_and_push_image() {
         exit 1
     fi
 
-    log_info "Building Docker image for $service..."
+    log_info "Building Docker image for $service..." >&2
 
     # Calculate source hash
     local source_hash=$(find "$service_dir/app" -type f -name "*.py" -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 | head -c 8)
@@ -143,31 +143,28 @@ build_and_push_image() {
     local image_tag="${git_sha}-${source_hash}"
     local image_url="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${service}:${image_tag}"
 
-    log_info "Image: $image_url"
+    log_info "Image: $image_url" >&2
 
     # Check if image already exists
     if gcloud artifacts docker images describe "$image_url" --project="$PROJECT_ID" &>/dev/null; then
-        log_success "Image already exists, skipping build"
+        log_success "Image already exists, skipping build" >&2
         echo "$image_url"
         return 0
     fi
 
-    # Build and push with Cloud Build
-    log_info "Building with Cloud Build..."
-    gcloud builds submit "$service_dir" \
-        --project="$PROJECT_ID" \
-        --tag="$image_url" \
-        --quiet
+    # Configure Docker auth
+    gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet >&2
 
-    # Get digest
-    local digest=$(gcloud artifacts docker images describe "$image_url" \
-        --project="$PROJECT_ID" \
-        --format='value(image_summary.digest)')
+    # Build locally with Docker
+    log_info "Building with Docker (local)..." >&2
+    docker build --platform linux/amd64 -t "$image_url" "$service_dir" >&2
 
-    local image_url_with_digest="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${service}@${digest}"
+    # Push to Artifact Registry
+    log_info "Pushing to Artifact Registry..." >&2
+    docker push "$image_url" >&2
 
-    log_success "Image built: $image_url_with_digest"
-    echo "$image_url_with_digest"
+    log_success "Image built and pushed: $image_url" >&2
+    echo "$image_url"
 }
 
 deploy_infrastructure() {
@@ -214,9 +211,12 @@ deploy_service() {
 
     cd "$service_terraform"
 
-    # Initialize Terraform
+    # Initialize Terraform with service-specific prefix
     log_info "Initializing Terraform..."
-    terraform init -backend-config="../../../$BACKEND_CONFIG" -reconfigure
+    terraform init \
+        -backend-config="../../../$BACKEND_CONFIG" \
+        -backend-config="prefix=copycat/services/${service}" \
+        -reconfigure
 
     # Plan with image URL
     log_info "Planning deployment..."

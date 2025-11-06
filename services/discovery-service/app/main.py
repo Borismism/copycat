@@ -2,16 +2,22 @@
 # Force rebuild with packaging dependency
 
 import logging
+import sys
+import traceback
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .config import settings
-from .middleware import RequestLoggingMiddleware, setup_logging
 from .routers import discover, health
 
-# Setup logging
-setup_logging()
+# Setup logging with full stack traces
+logging.basicConfig(
+    level=logging.DEBUG if settings.debug else logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app
@@ -32,8 +38,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add request logging middleware
-app.add_middleware(RequestLoggingMiddleware)
+# Global exception handler with full stack traces
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {exc}")
+    logger.error(traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc), "type": type(exc).__name__}
+    )
 
 # Include routers
 app.include_router(health.router)

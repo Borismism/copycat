@@ -2,6 +2,8 @@
 # CLOUD RUN SERVICE - Frontend Service (React SPA)
 # ==============================================================================
 
+# Locals removed - using simple hash from locals.tf that excludes build artifacts
+
 resource "google_cloud_run_v2_service" "frontend_service" {
   name     = var.service_name
   location = var.region
@@ -42,16 +44,10 @@ resource "google_cloud_run_v2_service" "frontend_service" {
         value = data.terraform_remote_state.api_service.outputs.service_url
       }
 
-      # Environment (dev/prod)
-      env {
-        name  = "ENVIRONMENT"
-        value = var.environment
-      }
-
-      # Source code hash - triggers redeployment when app code changes
+      # Source code hash - triggers redeployment when Python backend changes
       env {
         name  = "SOURCE_CODE_HASH"
-        value = local.source_code_hash
+        value = local.app_source_hash
       }
 
       # Health check probes

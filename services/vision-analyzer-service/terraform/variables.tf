@@ -19,12 +19,6 @@ variable "gemini_location" {
   default     = "us-central1"
 }
 
-variable "environment" {
-  description = "Environment (dev/prod)"
-  type        = string
-  default     = "dev"
-}
-
 variable "service_name" {
   description = "Service name"
   type        = string
@@ -73,4 +67,11 @@ variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
   default     = 1 # Process one video at a time
+}
+
+# Budget configuration
+variable "daily_budget_usd" {
+  description = "Daily Gemini API budget in USD"
+  type        = string
+  default     = "260" # Production default: €240 ≈ $260
 }

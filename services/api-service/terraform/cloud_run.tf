@@ -56,11 +56,6 @@ resource "google_cloud_run_v2_service" "api_service" {
         value = var.region
       }
 
-      env {
-        name  = "ENVIRONMENT"
-        value = var.environment
-      }
-
       # Firestore Configuration
       env {
         name  = "FIRESTORE_DATABASE"
@@ -73,16 +68,28 @@ resource "google_cloud_run_v2_service" "api_service" {
         value = "scan-ready"
       }
 
-      # BigQuery Configuration
+      # Environment (dev/prod)
       env {
-        name  = "BIGQUERY_DATASET"
-        value = "copycat_${var.environment}"
+        name  = "ENVIRONMENT"
+        value = var.environment
       }
 
       # Discovery Service URL
       env {
         name  = "DISCOVERY_SERVICE_URL"
         value = data.terraform_remote_state.discovery_service.outputs.service_url
+      }
+
+      # Vision Analyzer Service URL
+      env {
+        name  = "VISION_ANALYZER_SERVICE_URL"
+        value = data.terraform_remote_state.vision_analyzer_service.outputs.service_url
+      }
+
+      # Gemini Configuration
+      env {
+        name  = "GEMINI_LOCATION"
+        value = var.gemini_location
       }
 
       # Source code hash - triggers redeployment when app code changes
@@ -127,14 +134,9 @@ resource "google_cloud_run_v2_service" "api_service" {
     google_project_iam_member.firestore_user,
     google_project_iam_member.bigquery_viewer,
     google_project_iam_member.pubsub_publisher,
-    google_cloud_run_service_iam_member.api_invoke_discovery,
+    google_cloud_run_v2_service_iam_member.api_invoke_discovery,
   ]
 }
 
-# Allow unauthenticated access (public API)
-resource "google_cloud_run_service_iam_member" "api_noauth" {
-  service  = google_cloud_run_v2_service.api_service.name
-  location = var.region
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
+# Removed public access - API service is now protected by IAP
+# Only frontend-service can invoke (configured in frontend-service/terraform/iam.tf)

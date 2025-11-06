@@ -7,6 +7,10 @@ resource "google_project_service" "iap" {
   disable_on_destroy = false
 }
 
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
 # OAuth Brand (consent screen)
 resource "google_iap_brand" "oauth_brand" {
   support_email     = var.iap_support_email
@@ -35,7 +39,7 @@ resource "google_secret_manager_secret" "iap_oauth_client_secret" {
     purpose = "iap-auth"
   }
 
-  depends_on = [google_project_service.secretmanager]
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_secret_manager_secret_version" "iap_oauth_client_secret" {

@@ -19,12 +19,6 @@ variable "scheduler_region" {
   default     = "europe-west1"
 }
 
-variable "environment" {
-  description = "Environment (dev/prod)"
-  type        = string
-  default     = "dev"
-}
-
 variable "service_name" {
   description = "Service name"
   type        = string

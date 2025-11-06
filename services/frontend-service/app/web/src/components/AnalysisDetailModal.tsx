@@ -25,7 +25,7 @@ export default function AnalysisDetailModal({
     setRescanSuccess(false)
     try {
       // Trigger immediate scan via API
-      const response = await fetch(`http://localhost:8080/api/videos/${videoId}/scan`, {
+      const response = await fetch(`/api/videos/${videoId}/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       })

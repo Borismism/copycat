@@ -13,7 +13,7 @@ resource "google_pubsub_subscription" "scan_ready" {
     push_endpoint = "${google_cloud_run_v2_service.vision_analyzer_service.uri}/analyze"
 
     oidc_token {
-      service_account_email = google_service_account.vision_analyzer_service.email
+      service_account_email = google_service_account.push_sa.email
       audience              = google_cloud_run_v2_service.vision_analyzer_service.uri
     }
   }
@@ -25,7 +25,7 @@ resource "google_pubsub_subscription" "scan_ready" {
 
   dead_letter_policy {
     dead_letter_topic     = "projects/${var.project_id}/topics/copycat-dead-letter"
-    max_delivery_attempts = 3 # Lower for vision (expensive retries)
+    max_delivery_attempts = 5 # GCP minimum is 5
   }
 
   expiration_policy {
@@ -34,6 +34,6 @@ resource "google_pubsub_subscription" "scan_ready" {
 
   depends_on = [
     google_cloud_run_v2_service.vision_analyzer_service,
-    google_cloud_run_v2_service_iam_member.pubsub_invoker,
+    google_cloud_run_v2_service_iam_member.run_invoker_push_sa,
   ]
 }

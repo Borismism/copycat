@@ -10,36 +10,12 @@ output "pubsub_topics" {
 
 output "firestore_database" {
   description = "Firestore database name"
-  value       = google_firestore_database.copycat.name
+  value       = google_firestore_database.copycat.name  # "copycat"
 }
 
-output "storage_buckets" {
-  description = "Cloud Storage bucket names"
-  value = {
-    frames  = google_storage_bucket.frames.name
-    results = google_storage_bucket.results.name
-  }
-}
-
-output "bigquery_dataset" {
-  description = "BigQuery dataset ID"
-  value       = google_bigquery_dataset.copycat.dataset_id
-}
-
-output "bigquery_tables" {
-  description = "BigQuery table IDs"
-  value = {
-    results = google_bigquery_table.results.table_id
-    metrics = google_bigquery_table.metrics.table_id
-  }
-}
-
-output "artifact_registry_repos" {
-  description = "Artifact Registry repository names"
-  value = {
-    docker = google_artifact_registry_repository.docker.name
-    python = google_artifact_registry_repository.python.name
-  }
+output "artifact_registry_repo" {
+  description = "Artifact Registry Docker repository name"
+  value       = google_artifact_registry_repository.docker.name
 }
 
 output "docker_repo_url" {
@@ -76,10 +52,11 @@ output "wif_service_account" {
   value       = google_service_account.github_actions_deployer.email
 }
 
-output "iap_oauth_client_id" {
-  description = "IAP OAuth client ID"
-  value       = google_iap_client.oauth_client.client_id
-}
+# IAP manually managed
+# output "iap_oauth_client_id" {
+#   description = "IAP OAuth client ID"
+#   value       = google_iap_client.oauth_client.client_id
+# }
 
 output "frontend_lb_ip" {
   description = "Frontend load balancer IP address"
@@ -131,7 +108,7 @@ output "setup_instructions" {
   ✅ Identity-Aware Proxy (IAP): Frontend authentication configured
      Domain: ${var.frontend_domain}
      Load Balancer IP: ${google_compute_global_address.frontend_lb_ip.address}
-     OAuth Client ID: ${google_iap_client.oauth_client.client_id}
+     OAuth Client ID: 758832959323-d4ecbo0vid9f3m846maptpf47krgo4e1.apps.googleusercontent.com (manually managed)
      Authorized Users: ${length(var.iap_authorized_users)} configured
 
      🌐 DNS Configuration Required:

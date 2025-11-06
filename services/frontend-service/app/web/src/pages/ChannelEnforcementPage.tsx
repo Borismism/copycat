@@ -415,65 +415,72 @@ export default function ChannelEnforcementPage() {
                 </div>
               </div>
 
-              {/* Main Metrics - Only Key Stats */}
+              {/* Main Metrics - Compact List Format */}
               <div className="p-5">
-                <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="space-y-2 text-sm">
                   {/* Risk Score */}
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-gray-900">{channel.risk_score}</div>
-                    <div className="text-xs text-gray-500 mt-1">Risk</div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Risk Score</span>
+                    <span className="text-xl font-bold text-gray-900">{channel.risk_score}/100</span>
                   </div>
 
-                  {/* Infringement Count */}
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-red-600">{channel.confirmed_infringements}</div>
-                    <div className="text-xs text-gray-500 mt-1">Violations</div>
-                  </div>
-
-                  {/* Infringement Rate */}
-                  <div className="text-center">
-                    <div className={`text-3xl font-bold ${
-                      infringementRate > 50 ? 'text-red-600' :
-                      infringementRate > 25 ? 'text-orange-600' :
-                      infringementRate > 0 ? 'text-yellow-600' :
-                      'text-green-600'
-                    }`}>
-                      {infringementRate.toFixed(0)}%
+                  {/* Infringements with Rate */}
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Infringements</span>
+                    <div className="text-right">
+                      <span className="text-xl font-bold text-red-600">{channel.confirmed_infringements}</span>
+                      <span className={`ml-2 text-sm font-medium ${
+                        infringementRate > 50 ? 'text-red-600' :
+                        infringementRate > 25 ? 'text-orange-600' :
+                        infringementRate > 0 ? 'text-yellow-600' :
+                        'text-green-600'
+                      }`}>
+                        {infringementRate.toFixed(1)}% rate
+                      </span>
                     </div>
-                    <div className="text-xs text-gray-500 mt-1">Rate</div>
                   </div>
-                </div>
 
-                {/* Secondary Info */}
-                <div className="pt-3 border-t border-gray-200 text-sm text-gray-600 space-y-1">
-                  <div className="flex justify-between">
-                    <span>Scanned:</span>
-                    <span className="font-medium">{videosScanned} / {channel.total_videos_found}</span>
+                  {/* Cleared */}
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Cleared</span>
+                    <span className="text-lg font-bold text-green-600">{channel.videos_cleared}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Subscribers:</span>
-                    <span className="font-medium">
-                      {channel.subscriber_count ? channel.subscriber_count.toLocaleString() : 'N/A'}
+
+                  {/* Total Found */}
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Total Found</span>
+                    <span className="text-lg font-bold text-gray-900">{channel.total_videos_found}</span>
+                  </div>
+
+                  {/* Unscanned */}
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-600 font-medium">Unscanned</span>
+                    <span className="text-lg font-bold text-orange-600">
+                      {channel.total_videos_found - videosScanned}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Channel Videos:</span>
-                    <span className="font-medium">
-                      {channel.video_count ? channel.video_count.toLocaleString() : 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Total Views:</span>
-                    <span className="font-medium">
-                      {channel.total_views ? channel.total_views.toLocaleString() : '0'}
-                    </span>
-                  </div>
-                  {channel.assigned_to && (
+
+                  {/* Optional: Subscribers & Total Views (collapsed) */}
+                  <div className="pt-3 mt-3 border-t border-gray-200 text-xs text-gray-500 space-y-1">
                     <div className="flex justify-between">
-                      <span>Assigned:</span>
-                      <span className="font-medium truncate ml-2" title={channel.assigned_to}>{channel.assigned_to}</span>
+                      <span>Subscribers:</span>
+                      <span className="font-medium">
+                        {channel.subscriber_count ? channel.subscriber_count.toLocaleString() : 'N/A'}
+                      </span>
                     </div>
-                  )}
+                    <div className="flex justify-between">
+                      <span>Total Views:</span>
+                      <span className="font-medium">
+                        {channel.total_views ? channel.total_views.toLocaleString() : '0'}
+                      </span>
+                    </div>
+                    {channel.assigned_to && (
+                      <div className="flex justify-between">
+                        <span>Assigned:</span>
+                        <span className="font-medium truncate ml-2" title={channel.assigned_to}>{channel.assigned_to}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Action Buttons */}

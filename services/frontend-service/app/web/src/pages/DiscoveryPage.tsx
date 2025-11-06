@@ -55,14 +55,14 @@ export default function DiscoveryPage() {
     } finally {
       setHistoryLoading(false)
     }
-  }, [historyLoading, historyLimit])
+  }, [historyLimit])  // Remove historyLoading from deps
 
   // Initial history load and auto-refresh
   useEffect(() => {
     loadHistory(0)
     const interval = setInterval(() => loadHistory(0), 10000)
     return () => clearInterval(interval)
-  }, [loadHistory])
+  }, [])  // Empty deps - only run once on mount
 
   // Infinite scroll observer for history
   useEffect(() => {
@@ -85,7 +85,7 @@ export default function DiscoveryPage() {
         observer.unobserve(currentTarget)
       }
     }
-  }, [hasMoreHistory, historyLoading, historyOffset, loadHistory])
+  }, [hasMoreHistory, historyLoading, historyOffset])  // Remove loadHistory
 
   const loadQuota = async () => {
     try {

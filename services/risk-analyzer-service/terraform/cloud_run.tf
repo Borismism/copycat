@@ -5,7 +5,7 @@
 resource "google_cloud_run_v2_service" "risk_analyzer_service" {
   name     = var.service_name
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY" # Only accessible from PubSub and other services
+  ingress  = "INGRESS_TRAFFIC_ALL" # IAM-protected, accessible from PubSub
 
   template {
     service_account = google_service_account.risk_analyzer_service.email
@@ -47,11 +47,6 @@ resource "google_cloud_run_v2_service" "risk_analyzer_service" {
         value = var.region
       }
 
-      env {
-        name  = "ENVIRONMENT"
-        value = var.environment
-      }
-
       # Firestore Configuration
       env {
         name  = "FIRESTORE_DATABASE_ID"
@@ -83,12 +78,12 @@ resource "google_cloud_run_v2_service" "risk_analyzer_service" {
       # Logging Configuration
       env {
         name  = "LOG_LEVEL"
-        value = var.environment == "prod" ? "INFO" : "DEBUG"
+        value = "DEBUG"
       }
 
       env {
         name  = "DEBUG"
-        value = var.environment == "dev" ? "true" : "false"
+        value = "true"
       }
 
       # Source code hash - triggers redeployment when app code changes
@@ -137,15 +132,4 @@ resource "google_cloud_run_v2_service" "risk_analyzer_service" {
   ]
 }
 
-# Allow PubSub to invoke this service
-resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker" {
-  name     = google_cloud_run_v2_service.risk_analyzer_service.name
-  location = google_cloud_run_v2_service.risk_analyzer_service.location
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-}
-
-# Get project number for PubSub service account
-data "google_project" "project" {
-  project_id = var.project_id
-}
+# Note: PubSub invoker permission is now handled via dedicated push SA in iam.tf

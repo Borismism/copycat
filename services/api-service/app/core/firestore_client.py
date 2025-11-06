@@ -97,11 +97,13 @@ class FirestoreClient:
 
         return videos, total
 
-    def _get_all_channel_stats(self) -> tuple[dict[str, int], dict[str, int]]:
-        """Calculate video counts and total views for ALL channels in one query."""
+    def _get_all_channel_stats(self) -> tuple[dict[str, int], dict[str, int], dict[str, int], dict[str, int]]:
+        """Calculate video counts, views, infringements, and cleared for ALL channels in one query."""
         all_videos = self.videos_collection.stream()
         channel_counts = {}
         channel_views = {}
+        channel_infringements = {}
+        channel_cleared = {}
 
         for video in all_videos:
             data = video.to_dict()
@@ -109,12 +111,24 @@ class FirestoreClient:
             if channel_id:
                 # Count videos
                 channel_counts[channel_id] = channel_counts.get(channel_id, 0) + 1
+
                 # Sum views
                 view_count = data.get("view_count", 0)
                 if view_count:
                     channel_views[channel_id] = channel_views.get(channel_id, 0) + view_count
 
-        return channel_counts, channel_views
+                # Count infringements and cleared (from actual analysis results)
+                status = data.get("status")
+                if status == "analyzed":
+                    analysis = data.get("analysis")
+                    if analysis and isinstance(analysis, dict):
+                        contains_infringement = analysis.get("contains_infringement", False)
+                        if contains_infringement:
+                            channel_infringements[channel_id] = channel_infringements.get(channel_id, 0) + 1
+                        else:
+                            channel_cleared[channel_id] = channel_cleared.get(channel_id, 0) + 1
+
+        return channel_counts, channel_views, channel_infringements, channel_cleared
 
     async def get_channel(self, channel_id: str) -> ChannelProfile | None:
         """Get a single channel by ID."""
@@ -158,17 +172,19 @@ class FirestoreClient:
         logger = logging.getLogger(__name__)
         from datetime import datetime, timezone
 
-        # Get video counts and view counts for ALL channels in one query
-        channel_video_counts, channel_views_map = self._get_all_channel_stats()
+        # Get video counts, views, infringements, and cleared for ALL channels in one query
+        channel_video_counts, channel_views_map, channel_infringements_map, channel_cleared_map = self._get_all_channel_stats()
 
         all_channels = []
         for doc in all_channels_docs:
             data = doc.to_dict()
             channel_id = data.get("channel_id", doc.id)
 
-            # Get total views and actual video count from the pre-computed maps
+            # Get ALL stats from the pre-computed maps (actual video data, not stale channel doc!)
             total_views = channel_views_map.get(channel_id, 0)
             actual_video_count = channel_video_counts.get(channel_id, 0)
+            confirmed_infringements = channel_infringements_map.get(channel_id, 0)
+            videos_cleared = channel_cleared_map.get(channel_id, 0)
 
             # Fill in missing fields with defaults
             channel_data = {
@@ -176,8 +192,8 @@ class FirestoreClient:
                 "channel_title": data.get("channel_title", "Unknown"),
                 "discovered_at": data.get("discovered_at", datetime.now(timezone.utc)),  # Required field!
                 "total_videos_found": actual_video_count,  # Use actual count from videos collection
-                "confirmed_infringements": data.get("confirmed_infringements", data.get("infringing_videos_count", 0)),
-                "videos_cleared": data.get("videos_cleared", 0),
+                "confirmed_infringements": confirmed_infringements,  # Use actual count from analyzed videos
+                "videos_cleared": videos_cleared,  # Use actual count from analyzed videos
                 "last_infringement_date": data.get("last_infringement_date"),
                 "infringement_rate": data.get("infringement_rate", 0.0),
                 "risk_score": data.get("channel_risk", 0),

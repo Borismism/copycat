@@ -52,8 +52,18 @@ async def trigger_discovery_stream(max_quota: int = 1000):
     async def event_generator():
         url = f"{settings.discovery_service_url}/discover/run/stream?max_quota={max_quota}"
 
+        # Get ID token for authentication (same as discovery_client)
+        from google.auth.transport.requests import Request
+        from google.oauth2 import id_token
+
+        headers = {}
+        if settings.environment != "local":
+            auth_req = Request()
+            token = id_token.fetch_id_token(auth_req, settings.discovery_service_url)
+            headers["authorization"] = f"Bearer {token}"
+
         async with httpx.AsyncClient(timeout=300.0) as client:
-            async with client.stream("GET", url) as response:
+            async with client.stream("GET", url, headers=headers) as response:
                 async for chunk in response.aiter_raw():
                     if chunk:
                         yield chunk

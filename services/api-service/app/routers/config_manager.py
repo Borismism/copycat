@@ -33,7 +33,7 @@ def get_gemini_client() -> genai.Client:
         _gemini_client = genai.Client(
             vertexai=True,
             project=project,
-            location='us-central1'
+            location=os.getenv("GEMINI_LOCATION", "europe-west1")
         )
     return _gemini_client
 

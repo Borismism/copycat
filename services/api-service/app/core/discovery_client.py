@@ -23,8 +23,8 @@ class DiscoveryClient:
         if not self.base_url:
             raise ValueError("DISCOVERY_SERVICE_URL not configured")
 
-        # Skip IAM authentication in local/dev environments
-        if settings.environment in ["local", "dev"]:
+        # Skip IAM authentication only in local development
+        if settings.environment == "local":
             return None
 
         auth_req = Request()
@@ -145,8 +145,13 @@ class DiscoveryClient:
             return {"status": "unknown", "error": "DISCOVERY_SERVICE_URL not configured"}
 
         try:
+            token = self._get_id_token()
+            headers = {}
+            if token:
+                headers["authorization"] = f"Bearer {token}"
+
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(f"{self.base_url}/health")
+                response = await client.get(f"{self.base_url}/health", headers=headers)
                 response.raise_for_status()
                 return response.json()
         except Exception as e:

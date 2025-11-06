@@ -5,7 +5,7 @@
 resource "google_cloud_run_v2_service" "vision_analyzer_service" {
   name     = var.service_name
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_ONLY" # Only accessible from PubSub and other services
+  ingress  = "INGRESS_TRAFFIC_ALL" # IAM-protected, accessible from PubSub
 
   template {
     service_account = google_service_account.vision_analyzer_service.email
@@ -56,11 +56,6 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
         value = var.region
       }
 
-      env {
-        name  = "ENVIRONMENT"
-        value = var.environment
-      }
-
       # Firestore Configuration
       env {
         name  = "FIRESTORE_DATABASE_ID"
@@ -78,17 +73,6 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
         value = "vision-feedback"
       }
 
-      # BigQuery Configuration
-      env {
-        name  = "BIGQUERY_DATASET"
-        value = "copycat_${var.environment}"
-      }
-
-      env {
-        name  = "BIGQUERY_RESULTS_TABLE"
-        value = "vision_analysis_results"
-      }
-
       # Gemini Configuration (Vertex AI)
       env {
         name  = "GEMINI_MODEL"
@@ -103,7 +87,7 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
       # Budget Configuration
       env {
         name  = "DAILY_BUDGET_USD"
-        value = "260" # €240 ≈ $260
+        value = var.daily_budget_usd
       }
 
       # IP Config Configuration (Story 006)
@@ -125,12 +109,12 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
       # Logging Configuration
       env {
         name  = "LOG_LEVEL"
-        value = var.environment == "prod" ? "INFO" : "DEBUG"
+        value = "DEBUG"
       }
 
       env {
         name  = "DEBUG"
-        value = var.environment == "dev" ? "true" : "false"
+        value = "true"
       }
 
       # Source code hash - triggers redeployment when app code changes

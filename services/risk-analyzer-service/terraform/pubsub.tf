@@ -13,7 +13,7 @@ resource "google_pubsub_subscription" "video_discovered" {
     push_endpoint = "${google_cloud_run_v2_service.risk_analyzer_service.uri}/process/video-discovered"
 
     oidc_token {
-      service_account_email = google_service_account.risk_analyzer_service.email
+      service_account_email = google_service_account.push_sa.email
       audience              = google_cloud_run_v2_service.risk_analyzer_service.uri
     }
   }
@@ -34,7 +34,7 @@ resource "google_pubsub_subscription" "video_discovered" {
 
   depends_on = [
     google_cloud_run_v2_service.risk_analyzer_service,
-    google_cloud_run_v2_service_iam_member.pubsub_invoker,
+    google_cloud_run_v2_service_iam_member.run_invoker_push_sa,
   ]
 }
 
@@ -49,7 +49,7 @@ resource "google_pubsub_subscription" "vision_feedback" {
     push_endpoint = "${google_cloud_run_v2_service.risk_analyzer_service.uri}/process/vision-feedback"
 
     oidc_token {
-      service_account_email = google_service_account.risk_analyzer_service.email
+      service_account_email = google_service_account.push_sa.email
       audience              = google_cloud_run_v2_service.risk_analyzer_service.uri
     }
   }
@@ -70,6 +70,6 @@ resource "google_pubsub_subscription" "vision_feedback" {
 
   depends_on = [
     google_cloud_run_v2_service.risk_analyzer_service,
-    google_cloud_run_v2_service_iam_member.pubsub_invoker,
+    google_cloud_run_v2_service_iam_member.run_invoker_push_sa,
   ]
 }

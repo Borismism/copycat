@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     environment: str = "development"
 
     # Firestore
-    firestore_database_id: str = "(default)"
+    firestore_database_id: str = "copycat"  # Matches terraform default
 
     # PubSub
     pubsub_topic_discovered_videos: str = "discovered-videos"

@@ -5,7 +5,7 @@
 resource "google_cloud_run_v2_service" "discovery_service" {
   name     = var.service_name
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_INTERNAL_AND_CLOUD_LOAD_BALANCING" # Accessible from scheduler and internal
+  ingress  = "INGRESS_TRAFFIC_ALL" # IAM-protected, accessible from scheduler
 
   template {
     service_account = google_service_account.discovery_service.email
@@ -56,11 +56,6 @@ resource "google_cloud_run_v2_service" "discovery_service" {
         value = var.region
       }
 
-      env {
-        name  = "ENVIRONMENT"
-        value = var.environment
-      }
-
       # Firestore Configuration
       env {
         name  = "FIRESTORE_DATABASE_ID"
@@ -102,12 +97,12 @@ resource "google_cloud_run_v2_service" "discovery_service" {
       # Logging Configuration
       env {
         name  = "LOG_LEVEL"
-        value = var.environment == "prod" ? "INFO" : "DEBUG"
+        value = "DEBUG"
       }
 
       env {
         name  = "DEBUG"
-        value = var.environment == "dev" ? "true" : "false"
+        value = "true"
       }
 
       # Source code hash - triggers redeployment when app code changes
