@@ -17,7 +17,7 @@ def get_firestore_client() -> firestore.Client:
     if _firestore_client is None:
         _firestore_client = firestore.Client(
             project=settings.gcp_project_id,
-            database="(default)",
+            database=settings.firestore_database_id,
         )
     return _firestore_client
 
