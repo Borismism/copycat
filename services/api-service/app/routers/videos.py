@@ -75,25 +75,34 @@ async def list_videos(
 @router.get("/processing/list")
 async def list_processing_videos():
     """
-    Get all currently processing videos.
+    Get all currently processing videos (OPTIMIZED).
 
     Returns list of videos that are actively being scanned by Gemini.
     Useful for showing progress indicators and allowing users to reopen progress modals.
     """
     import logging
+    from google.cloud import firestore as gcp_firestore
+
     logger = logging.getLogger(__name__)
 
     try:
-        # Get all videos with status = 'processing'
-        from app.models import VideoStatus
+        # OPTIMIZED: Direct Firestore query without pagination overhead
+        # Only fetch processing videos (should be 0-10 typically)
+        query = firestore_client.videos_collection.where("status", "==", "processing").limit(50)
 
-        videos, total = await firestore_client.list_videos(
-            status=VideoStatus.PROCESSING,
-            sort_by="processing_started_at",
-            sort_desc=True,
-            limit=100,
-            offset=0,
-        )
+        docs = list(query.stream())
+
+        videos = []
+        for doc in docs:
+            data = doc.to_dict()
+
+            # Map analysis field to vision_analysis for API response
+            if data.get("analysis"):
+                data["vision_analysis"] = data["analysis"]
+
+            # Import here to avoid circular dependency
+            from app.models import VideoMetadata
+            videos.append(VideoMetadata(**data))
 
         return {
             "processing_videos": videos,
