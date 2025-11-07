@@ -40,7 +40,7 @@ variable "min_instances" {
 variable "max_instances" {
   description = "Maximum number of instances"
   type        = number
-  default     = 10
+  default     = 1000  # Support 1000 concurrent video analyses
 }
 
 # Resource limits
