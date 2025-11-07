@@ -75,3 +75,8 @@ variable "daily_budget_usd" {
   type        = string
   default     = "260" # Production default: €240 ≈ $260
 }
+
+variable "state_bucket" {
+  description = "GCS bucket for Terraform state"
+  type        = string
+}

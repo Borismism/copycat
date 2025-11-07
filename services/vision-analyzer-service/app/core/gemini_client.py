@@ -4,6 +4,7 @@ This module provides a client for interacting with Google's Gemini 2.5 Flash mod
 through Vertex AI, supporting direct YouTube URL analysis.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -189,7 +190,7 @@ class GeminiClient:
                     logger.warning(
                         f"Rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
                     )
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                 else:
                     logger.error(f"Rate limit exceeded after {max_retries} retries")
                     raise

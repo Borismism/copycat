@@ -61,4 +61,6 @@ resource "google_cloud_run_v2_service_iam_member" "run_invoker_push_sa" {
   location = var.region
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.push_sa.email}"
+
+  depends_on = [google_cloud_run_v2_service.risk_analyzer_service]
 }

@@ -1,1 +1,1 @@
-bucket = "tf-state-your-prod-project-id"  # ← UPDATE when deploying to prod
+bucket = "tf-state-copycat-429012"

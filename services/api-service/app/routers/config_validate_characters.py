@@ -189,7 +189,10 @@ async def save_ip_config(request: SaveIPConfigRequest):
     """
     try:
         # Initialize Firestore
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(
+            project=os.getenv("GCP_PROJECT_ID", "copycat-local"),
+            database=os.getenv("FIRESTORE_DATABASE", "copycat")
+        )
 
         # Generate IP ID from name (lowercase, hyphenated)
         ip_id = request.name.lower().replace(" ", "-").replace("'", "")

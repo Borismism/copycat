@@ -15,6 +15,9 @@ github_repository = "Borismism/copycat"
 # Artifact Registry
 artifact_repo_id = "copycat-docker"
 
+# Terraform State Bucket
+state_bucket = "irdeto-copycat-tf-state"
+
 # Frontend Domain & IAP
 frontend_domain      = "copycat-dev.borism.nl"
 iap_support_email    = "boris@nextnovate.com"

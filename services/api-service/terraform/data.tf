@@ -6,7 +6,7 @@
 data "terraform_remote_state" "global" {
   backend = "gcs"
   config = {
-    bucket = "irdeto-copycat-tf-state"
+    bucket = var.state_bucket
     prefix = "copycat/global-infra"
   }
 }
@@ -15,7 +15,7 @@ data "terraform_remote_state" "global" {
 data "terraform_remote_state" "discovery_service" {
   backend = "gcs"
   config = {
-    bucket = "irdeto-copycat-tf-state"
+    bucket = var.state_bucket
     prefix = "copycat/services/discovery-service"
   }
 }
@@ -24,7 +24,7 @@ data "terraform_remote_state" "discovery_service" {
 data "terraform_remote_state" "vision_analyzer_service" {
   backend = "gcs"
   config = {
-    bucket = "irdeto-copycat-tf-state"
+    bucket = var.state_bucket
     prefix = "copycat/services/vision-analyzer-service"
   }
 }

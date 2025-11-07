@@ -5,7 +5,7 @@
 # ==============================================================================
 
 # GCP Project Configuration
-project_id = "your-prod-project-id"              # ← FILL THIS
+project_id = "copycat-429012"              # ← FILL THIS
 region     = "europe-west4"
 
 # GitHub Repository (for Workload Identity Federation)
@@ -14,9 +14,12 @@ github_repository = "Borismism/copycat"
 # Artifact Registry
 artifact_repo_id = "copycat-docker"
 
+# Terraform State Bucket
+state_bucket = "tf-state-copycat-429012"
+
 # Frontend Domain & IAP
 frontend_domain      = "copycat.borism.nl"        # ← FILL THIS
-iap_support_email    = "support@borism.nl"        # ← FILL THIS
+iap_support_email    = "boris@nextnovate.com"        # ← FILL THIS
 iap_authorized_users = [
   "user:boris@nextnovate.com",                    # ← UPDATE THIS
 ]
@@ -30,5 +33,5 @@ discovery_schedule      = "0 * * * *"  # Every hour
 hourly_quota_budget     = 417          # 10,000 / 24
 
 # Gemini Configuration
-gemini_location         = "us-central1"
+gemini_location         = "us-central1"  # Primary region for Gemini models
 daily_budget_usd        = "260"  # €240 ≈ $260 for full production

@@ -55,3 +55,8 @@ variable "concurrency" {
   type        = number
   default     = 80
 }
+
+variable "state_bucket" {
+  description = "GCS bucket for Terraform state"
+  type        = string
+}

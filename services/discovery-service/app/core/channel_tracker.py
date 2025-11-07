@@ -58,6 +58,9 @@ class ChannelTracker:
                     "discovered_at": datetime.now(timezone.utc),
                     "last_seen_at": datetime.now(timezone.utc),
                     "video_count": 1,  # First video!
+                    "channel_risk": 40,  # Default risk for unknown channels (updated by risk-analyzer after scans)
+                    "infringing_videos_count": 0,
+                    "total_videos_found": 1,
                 }
 
                 # Try to fetch real thumbnail from YouTube API if available

@@ -9,7 +9,10 @@ import os
 router = APIRouter()
 
 # Initialize Firestore
-db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+db = firestore.Client(
+    project=os.getenv("GCP_PROJECT_ID", "copycat-local"),
+    database="copycat"
+)
 
 
 class KeywordScanStat(BaseModel):

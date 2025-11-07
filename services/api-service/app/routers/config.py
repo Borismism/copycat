@@ -133,7 +133,7 @@ async def list_ip_configs() -> dict[str, Any]:
         }
     """
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         docs = db.collection("ip_configs").stream()
 
         configs = []
@@ -203,7 +203,7 @@ class UpdateFieldRequest(BaseModel):
 async def update_characters(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update characters list for a config."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         db.collection("ip_configs").document(config_id).update({
             "characters": request.values,
             "updated_at": datetime.utcnow().isoformat()
@@ -219,7 +219,7 @@ async def update_characters(config_id: str, request: UpdateFieldRequest) -> dict
 async def update_keywords(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update search keywords list for a config."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         db.collection("ip_configs").document(config_id).update({
             "search_keywords": request.values,
             "updated_at": datetime.utcnow().isoformat()
@@ -235,7 +235,7 @@ async def update_keywords(config_id: str, request: UpdateFieldRequest) -> dict[s
 async def update_high_priority_keywords(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update high priority keywords and recombine into search_keywords."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         doc_ref = db.collection("ip_configs").document(config_id)
         doc = doc_ref.get()
 
@@ -269,7 +269,7 @@ async def update_high_priority_keywords(config_id: str, request: UpdateFieldRequ
 async def update_medium_priority_keywords(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update medium priority keywords and recombine into search_keywords."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         doc_ref = db.collection("ip_configs").document(config_id)
         doc = doc_ref.get()
 
@@ -303,7 +303,7 @@ async def update_medium_priority_keywords(config_id: str, request: UpdateFieldRe
 async def update_low_priority_keywords(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update low priority keywords and recombine into search_keywords."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         doc_ref = db.collection("ip_configs").document(config_id)
         doc = doc_ref.get()
 
@@ -337,7 +337,7 @@ async def update_low_priority_keywords(config_id: str, request: UpdateFieldReque
 async def update_ai_patterns(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update AI tool patterns list for a config."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         db.collection("ip_configs").document(config_id).update({
             "ai_tool_patterns": request.values,
             "updated_at": datetime.utcnow().isoformat()
@@ -353,7 +353,7 @@ async def update_ai_patterns(config_id: str, request: UpdateFieldRequest) -> dic
 async def update_visual_keywords(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update visual keywords list for a config."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         db.collection("ip_configs").document(config_id).update({
             "visual_keywords": request.values,
             "updated_at": datetime.utcnow().isoformat()
@@ -369,7 +369,7 @@ async def update_visual_keywords(config_id: str, request: UpdateFieldRequest) ->
 async def update_video_titles(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update common video titles list for a config."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         db.collection("ip_configs").document(config_id).update({
             "common_video_titles": request.values,
             "updated_at": datetime.utcnow().isoformat()
@@ -385,7 +385,7 @@ async def update_video_titles(config_id: str, request: UpdateFieldRequest) -> di
 async def update_false_positive_filters(config_id: str, request: UpdateFieldRequest) -> dict[str, Any]:
     """Update false positive filters list for a config."""
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         db.collection("ip_configs").document(config_id).update({
             "false_positive_filters": request.values,
             "updated_at": datetime.utcnow().isoformat()
@@ -409,7 +409,7 @@ async def delete_config(config_id: str) -> dict[str, Any]:
         Success confirmation with deleted config details
     """
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         doc_ref = db.collection("ip_configs").document(config_id)
 
         # Get the document first to check if exists
@@ -482,7 +482,7 @@ async def list_deleted_configs() -> dict[str, Any]:
         }
     """
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         docs = db.collection("ip_configs").stream()
 
         configs = []
@@ -537,7 +537,7 @@ async def restore_config(config_id: str) -> dict[str, Any]:
         Success confirmation with restored config details
     """
     try:
-        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"))
+        db = firestore.Client(project=os.getenv("GCP_PROJECT_ID", "copycat-local"), database="copycat")
         doc_ref = db.collection("ip_configs").document(config_id)
 
         # Get the document first to check if exists

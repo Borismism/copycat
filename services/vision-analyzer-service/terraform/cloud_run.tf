@@ -164,10 +164,5 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
   ]
 }
 
-# Allow PubSub to invoke this service
-resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker" {
-  name     = google_cloud_run_v2_service.vision_analyzer_service.name
-  location = google_cloud_run_v2_service.vision_analyzer_service.location
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
-}
+# Note: IAM invoker permission is configured via dedicated push SA in iam.tf (Nexus pattern)
+# The PubSub subscription uses this dedicated SA for OIDC authentication

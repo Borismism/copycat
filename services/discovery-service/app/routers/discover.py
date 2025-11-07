@@ -73,7 +73,7 @@ def get_video_processor(
 
 # Cached instances to avoid recreating on every request
 _quota_manager_cache: QuotaManager | None = None
-_search_randomizer_cache: SearchRandomizer | None = None
+# Note: SearchRandomizer is NOT cached - needs to pick up config changes from Firestore
 
 
 def get_quota_manager(
@@ -91,11 +91,13 @@ def get_quota_manager(
 def get_search_randomizer(
     firestore_client: firestore.Client = Depends(get_firestore_client),
 ) -> SearchRandomizer:
-    """Get search randomizer (cached singleton)."""
-    global _search_randomizer_cache
-    if _search_randomizer_cache is None:
-        _search_randomizer_cache = SearchRandomizer(firestore_client=firestore_client)
-    return _search_randomizer_cache
+    """
+    Get search randomizer (fresh instance each time to pick up config changes).
+
+    Note: No caching here because keywords can be updated in Firestore at any time.
+    Loading keywords is fast (single Firestore query), so recreating is acceptable.
+    """
+    return SearchRandomizer(firestore_client=firestore_client)
 
 
 def get_search_history(

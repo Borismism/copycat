@@ -51,6 +51,13 @@ resource "google_project_iam_member" "aiplatform_user" {
   member  = "serviceAccount:${google_service_account.vision_analyzer_service.email}"
 }
 
+# Vertex AI admin (required for gemini model endpoint access)
+resource "google_project_iam_member" "aiplatform_admin" {
+  project = var.project_id
+  role    = "roles/aiplatform.admin"
+  member  = "serviceAccount:${google_service_account.vision_analyzer_service.email}"
+}
+
 # Monitoring viewer (debugging and observability)
 resource "google_project_iam_member" "monitoring_viewer" {
   project = var.project_id

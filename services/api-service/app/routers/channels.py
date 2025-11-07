@@ -79,24 +79,105 @@ async def get_channel_statistics():
 
 
 @router.get("/scan-history")
-async def get_scan_history(limit: int = 50):
-    """Get recent scan history."""
+async def get_scan_history(limit: int = 50, offset: int = 0):
+    """
+    Get recent scan history with smart grouping by video_id.
+
+    For efficiency with large datasets:
+    - Fetches enough scans to fill the requested page
+    - Groups by video_id dynamically
+    - If grouping reduces results below limit, fetches more
+
+    Status logic:
+    - If ANY scan is "running" → status = "running"
+    - If ALL scans failed → status = "failed"
+    - If ANY scan completed → status = "completed"
+    """
     try:
         from google.cloud import firestore as fs
+        from collections import defaultdict
 
+        # Calculate how many scans to fetch
+        # Assume average 1.5 attempts per video (some have retries)
+        # Fetch extra to account for grouping reducing the count
+        fetch_multiplier = 3  # Fetch 3x to handle retries + pagination
+        fetch_limit = (limit + offset) * fetch_multiplier
+
+        # Fetch scans with smart limit
         scans = (
             firestore_client.db.collection("scan_history")
             .order_by("started_at", direction=fs.Query.DESCENDING)
-            .limit(limit)
+            .limit(fetch_limit)
             .stream()
         )
 
-        history = []
+        # Group scans by video_id
+        videos = defaultdict(list)
+        seen_video_ids = set()
+
         for scan in scans:
             data = scan.to_dict()
-            history.append(data)
+            video_id = data.get("video_id")
+            if video_id:
+                videos[video_id].append(data)
+                seen_video_ids.add(video_id)
 
-        return {"scans": history, "total": len(history)}
+        # Process each video group
+        grouped_scans = []
+        for video_id, attempts in videos.items():
+            # Sort attempts by started_at (most recent first)
+            attempts_sorted = sorted(
+                attempts,
+                key=lambda x: x.get("started_at") or "",
+                reverse=True
+            )
+
+            # Get the most recent attempt as the primary scan
+            latest = attempts_sorted[0]
+
+            # Determine aggregate status
+            statuses = [a.get("status") for a in attempts_sorted]
+
+            if "running" in statuses:
+                aggregate_status = "running"
+            elif all(s == "failed" for s in statuses):
+                aggregate_status = "failed"
+            elif "completed" in statuses:
+                aggregate_status = "completed"
+            else:
+                aggregate_status = latest.get("status", "unknown")
+
+            # Create grouped scan entry
+            grouped_scan = {
+                **latest,  # Use latest scan data as base
+                "status": aggregate_status,  # Override with aggregate status
+                "attempt_count": len(attempts_sorted),
+                "attempts": attempts_sorted if len(attempts_sorted) > 1 else None,
+            }
+
+            grouped_scans.append(grouped_scan)
+
+        # Sort by most recent started_at
+        grouped_scans.sort(
+            key=lambda x: x.get("started_at") or "",
+            reverse=True
+        )
+
+        # Apply pagination AFTER grouping
+        paginated_scans = grouped_scans[offset:offset + limit]
+
+        # Check if we have more results
+        # If we fetched more than we're returning, there are definitely more
+        has_more = len(grouped_scans) > offset + limit
+
+        return {
+            "scans": paginated_scans,
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more
+            # Note: No "total" field - we don't know the exact total without fetching everything
+            # Frontend should use has_more for pagination
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get scan history: {str(e)}")

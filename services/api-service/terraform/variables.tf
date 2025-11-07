@@ -67,3 +67,8 @@ variable "gemini_location" {
   type        = string
   default     = "europe-west1"
 }
+
+variable "state_bucket" {
+  description = "GCS bucket for Terraform state"
+  type        = string
+}

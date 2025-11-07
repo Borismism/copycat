@@ -15,15 +15,17 @@ data "google_project" "current" {
 resource "google_iap_brand" "oauth_brand" {
   support_email     = var.iap_support_email
   application_title = "Copycat Management"
-  project           = var.project_id
+  project           = data.google_project.current.number
 
   depends_on = [google_project_service.iap]
 }
 
-# OAuth Client for IAP
-resource "google_iap_client" "oauth_client" {
-  display_name = "Copycat IAP Client"
-  brand        = google_iap_brand.oauth_brand.name
+# OAuth Client for IAP (EXTERNAL - manually created, DO NOT DESTROY)
+# Client ID: REDACTED_CLIENT_ID
+# This is managed externally in Google Cloud Console and should NEVER be destroyed
+locals {
+  iap_client_id     = "REDACTED_CLIENT_ID"
+  iap_client_secret = "REDACTED_SECRET"
 }
 
 # Store OAuth client secret in Secret Manager
@@ -44,7 +46,7 @@ resource "google_secret_manager_secret" "iap_oauth_client_secret" {
 
 resource "google_secret_manager_secret_version" "iap_oauth_client_secret" {
   secret      = google_secret_manager_secret.iap_oauth_client_secret.id
-  secret_data = google_iap_client.oauth_client.secret
+  secret_data = local.iap_client_secret
 }
 
 # Global static IP address for load balancer
@@ -98,8 +100,8 @@ resource "google_compute_backend_service" "frontend_backend" {
 
   iap {
     enabled              = true
-    oauth2_client_id     = google_iap_client.oauth_client.client_id
-    oauth2_client_secret = google_iap_client.oauth_client.secret
+    oauth2_client_id     = local.iap_client_id
+    oauth2_client_secret = local.iap_client_secret
   }
 
   depends_on = [google_project_service.iap]

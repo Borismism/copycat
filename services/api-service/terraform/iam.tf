@@ -52,3 +52,17 @@ resource "google_cloud_run_v2_service_iam_member" "api_invoke_vision_analyzer" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.api_service.email}"
 }
+
+# Vertex AI user (for AI Assistant feature using Gemini)
+resource "google_project_iam_member" "aiplatform_user" {
+  project = var.project_id
+  role    = "roles/aiplatform.user"
+  member  = "serviceAccount:${google_service_account.api_service.email}"
+}
+
+# Vertex AI admin (required for gemini model endpoint access)
+resource "google_project_iam_member" "aiplatform_admin" {
+  project = var.project_id
+  role    = "roles/aiplatform.admin"
+  member  = "serviceAccount:${google_service_account.api_service.email}"
+}

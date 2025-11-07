@@ -94,3 +94,8 @@ variable "hourly_quota_budget" {
   type        = number
   default     = 417 # 10,000 / 24 ≈ 417
 }
+
+variable "state_bucket" {
+  description = "GCS bucket for Terraform state"
+  type        = string
+}
