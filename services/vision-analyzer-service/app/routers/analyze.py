@@ -7,7 +7,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from google.cloud import firestore
 from pydantic import BaseModel
 
@@ -35,15 +35,120 @@ budget_manager = None
 config_loader = None
 
 
+async def process_video_analysis(
+    scan_message: ScanReadyMessage,
+    scan_id: str,
+    configs: list,
+    video_analyzer,
+    firestore_client: firestore.Client,
+):
+    """
+    Background task to process video analysis (non-blocking).
+
+    This runs in the background so it doesn't block health checks.
+    """
+    video_id = scan_message.video_id
+
+    try:
+        # Process video analysis with configs (with timeout protection)
+        # Cloud Run timeout is 600s, set analysis timeout to 540s (9 minutes) to allow cleanup
+        try:
+            result = await asyncio.wait_for(
+                video_analyzer.analyze_video(
+                    video_metadata=scan_message.metadata, configs=configs, queue_size=1
+                ),
+                timeout=540  # 9 minutes - leaves 1 minute for cleanup before Cloud Run kills us
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Video analysis timed out after 540 seconds for video {video_id}")
+
+            # Mark video as failed due to timeout
+            try:
+                doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(video_id)
+                doc_ref.update({
+                    "status": "failed",
+                    "error_message": "Analysis timed out after 9 minutes (video too long or Gemini too slow)",
+                    "error_type": "TimeoutError",
+                    "failed_at": firestore.SERVER_TIMESTAMP
+                })
+                logger.info(f"Updated video {video_id} status to 'failed' due to timeout")
+            except Exception as update_error:
+                logger.error(f"Failed to update video status after timeout: {update_error}")
+
+            # Update scan history
+            try:
+                firestore_client.collection("scan_history").document(scan_id).update({
+                    "status": "failed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "error_message": "Analysis timeout (540s)",
+                })
+            except Exception as e:
+                logger.error(f"Failed to update scan history after timeout: {e}")
+
+            return  # Exit background task
+
+        has_infringement = any(ip.contains_infringement for ip in result.analysis.ip_results)
+        logger.info(
+            f"Successfully processed video {scan_message.video_id}: "
+            f"infringement={has_infringement}, "
+            f"action={result.analysis.overall_recommendation}"
+        )
+
+        # Update scan history to completed
+        try:
+            firestore_client.collection("scan_history").document(scan_id).update({
+                "status": "completed",
+                "completed_at": firestore.SERVER_TIMESTAMP,
+                "result": {
+                    "success": True,
+                    "has_infringement": has_infringement,
+                    "overall_recommendation": result.analysis.overall_recommendation,
+                    "cost_usd": result.metrics.cost_usd,
+                    "ip_count": len(result.analysis.ip_results),
+                }
+            })
+            logger.info(f"Updated scan history {scan_id} to completed")
+        except Exception as e:
+            logger.error(f"Failed to update scan history: {e}", exc_info=True)
+
+    except Exception as e:
+        logger.error(f"Background task failed for video {video_id}: {e}", exc_info=True)
+
+        # Update scan history to failed
+        try:
+            firestore_client.collection("scan_history").document(scan_id).update({
+                "status": "failed",
+                "completed_at": firestore.SERVER_TIMESTAMP,
+                "error_message": str(e),
+            })
+        except:
+            pass
+
+        # Update video status to failed
+        try:
+            doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(video_id)
+            doc_ref.update({
+                "status": "failed",
+                "error_message": str(e),
+                "error_type": type(e).__name__,
+                "failed_at": firestore.SERVER_TIMESTAMP
+            })
+        except Exception as update_error:
+            logger.error(f"Failed to update video status to failed: {update_error}")
+
+
 @router.post("/analyze")
-async def analyze_video(request: Request):
+async def analyze_video(request: Request, background_tasks: BackgroundTasks):
     """
     Receive PubSub push messages for video analysis.
 
     This endpoint is called by PubSub when a scan-ready message is published.
 
+    **CRITICAL: This endpoint returns immediately (200 OK) to avoid blocking health checks.**
+    Actual video analysis happens in a background task.
+
     Returns:
-        200 OK: Message processed successfully (or failed gracefully)
+        200 OK: Message accepted (processing in background)
         500 Error: Message should be retried
     """
     global video_analyzer, budget_manager, config_loader
@@ -226,75 +331,28 @@ async def analyze_video(request: Request):
                 # Return 200 OK (don't retry - this is a data problem)
                 return {"status": "error", "video_id": video_id, "message": f"No configs for {matched_ips}"}
 
-        # Process video analysis with configs (with timeout protection)
-        # Cloud Run timeout is 600s, set analysis timeout to 540s (9 minutes) to allow cleanup
-        try:
-            result = await asyncio.wait_for(
-                video_analyzer.analyze_video(
-                    video_metadata=scan_message.metadata, configs=configs, queue_size=1
-                ),
-                timeout=540  # 9 minutes - leaves 1 minute for cleanup before Cloud Run kills us
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"Video analysis timed out after 540 seconds for video {video_id}")
-
-            # Mark video as failed due to timeout
-            try:
-                doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(video_id)
-                doc_ref.update({
-                    "status": "failed",
-                    "error_message": "Analysis timed out after 9 minutes (video too long or Gemini too slow)",
-                    "error_type": "TimeoutError",
-                    "failed_at": firestore.SERVER_TIMESTAMP
-                })
-                logger.info(f"Updated video {video_id} status to 'failed' due to timeout")
-            except Exception as update_error:
-                logger.error(f"Failed to update video status after timeout: {update_error}")
-
-            # Update scan history
-            if scan_id:
-                try:
-                    firestore_client.collection("scan_history").document(scan_id).update({
-                        "status": "failed",
-                        "completed_at": firestore.SERVER_TIMESTAMP,
-                        "error_message": "Analysis timeout (540s)",
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to update scan history after timeout: {e}")
-
-            # Return 200 OK (don't retry - mark as permanently failed)
-            return {"status": "error", "video_id": video_id, "message": "Analysis timeout"}
-
-        has_infringement = any(ip.contains_infringement for ip in result.analysis.ip_results)
-        logger.info(
-            f"Successfully processed video {scan_message.video_id}: "
-            f"infringement={has_infringement}, "
-            f"action={result.analysis.overall_recommendation}"
+        # Schedule video analysis in background (non-blocking!)
+        # This allows /health endpoint to respond immediately
+        background_tasks.add_task(
+            process_video_analysis,
+            scan_message=scan_message,
+            scan_id=scan_id,
+            configs=configs,
+            video_analyzer=video_analyzer,
+            firestore_client=firestore_client,
         )
 
-        # Update scan history to completed
-        try:
-            firestore_client.collection("scan_history").document(scan_id).update({
-                "status": "completed",
-                "completed_at": firestore.SERVER_TIMESTAMP,
-                "result": {
-                    "success": True,
-                    "has_infringement": has_infringement,
-                    "overall_recommendation": result.analysis.overall_recommendation,
-                    "cost_usd": result.metrics.cost_usd,
-                    "ip_count": len(result.analysis.ip_results),
-                }
-            })
-            logger.info(f"Updated scan history {scan_id} to completed")
-        except Exception as e:
-            logger.error(f"Failed to update scan history: {e}", exc_info=True)
+        logger.info(
+            f"✅ Accepted video {video_id} for analysis (processing in background, "
+            f"health checks will continue to work)"
+        )
 
-        # Return 200 OK (message processed successfully)
+        # Return 200 OK immediately (analysis happening in background)
         return {
-            "status": "success",
+            "status": "accepted",
             "video_id": video_id,
-            "has_infringement": has_infringement,
-            "cost_usd": result.metrics.cost_usd
+            "scan_id": scan_id,
+            "message": "Video analysis started in background"
         }
 
     except Exception as e:
