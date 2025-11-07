@@ -109,8 +109,9 @@ async def get_scan_history_with_processing(limit: int = 50, offset: int = 0):
             return videos
 
         async def get_scan_hist():
-            fetch_multiplier = 3
-            fetch_limit = (limit + offset) * fetch_multiplier
+            # OPTIMIZED: Fetch only what we need + small buffer
+            # Most videos have 1-2 scan attempts, so fetch 2x instead of 3x
+            fetch_limit = (limit + offset) * 2  # Reduced from 3x to 2x
             scans = (
                 firestore_client.db.collection("scan_history")
                 .order_by("started_at", direction=fs.Query.DESCENDING)
@@ -198,13 +199,12 @@ async def get_scan_history(limit: int = 50, offset: int = 0):
         from google.cloud import firestore as fs
         from collections import defaultdict
 
-        # Calculate how many scans to fetch
-        # Assume average 1.5 attempts per video (some have retries)
-        # Fetch extra to account for grouping reducing the count
-        fetch_multiplier = 3  # Fetch 3x to handle retries + pagination
+        # OPTIMIZED: Fetch only what we need
+        # Most videos have 1-2 scan attempts, reduced from 3x to 2x multiplier
+        fetch_multiplier = 2  # Reduced from 3 to 2
         fetch_limit = (limit + offset) * fetch_multiplier
 
-        # Fetch scans with smart limit
+        # Fetch scans with optimized limit
         scans = (
             firestore_client.db.collection("scan_history")
             .order_by("started_at", direction=fs.Query.DESCENDING)
