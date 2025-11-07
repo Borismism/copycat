@@ -78,6 +78,107 @@ async def get_channel_statistics():
         raise HTTPException(status_code=500, detail=f"Failed to get channel stats: {str(e)}")
 
 
+@router.get("/scan-history-with-processing")
+async def get_scan_history_with_processing(limit: int = 50, offset: int = 0):
+    """
+    OPTIMIZED: Get scan history AND processing videos in one call.
+
+    Combines two endpoints to reduce round trips:
+    - /api/channels/scan-history
+    - /api/videos/processing/list
+
+    Returns both scan history and currently processing videos.
+    """
+    try:
+        from google.cloud import firestore as fs
+        from collections import defaultdict
+
+        # Execute both queries in parallel using asyncio
+        import asyncio
+
+        async def get_processing_videos():
+            query = firestore_client.videos_collection.where("status", "==", "processing").limit(50)
+            docs = list(query.stream())
+            videos = []
+            for doc in docs:
+                data = doc.to_dict()
+                if data.get("analysis"):
+                    data["vision_analysis"] = data["analysis"]
+                from app.models import VideoMetadata
+                videos.append(VideoMetadata(**data))
+            return videos
+
+        async def get_scan_hist():
+            fetch_multiplier = 3
+            fetch_limit = (limit + offset) * fetch_multiplier
+            scans = (
+                firestore_client.db.collection("scan_history")
+                .order_by("started_at", direction=fs.Query.DESCENDING)
+                .limit(fetch_limit)
+                .stream()
+            )
+            return list(scans)
+
+        # Run both queries in parallel
+        processing_videos, scan_docs = await asyncio.gather(
+            get_processing_videos(),
+            get_scan_hist()
+        )
+
+        # Process scan history (existing logic)
+        videos = defaultdict(list)
+        for scan in scan_docs:
+            data = scan.to_dict()
+            video_id = data.get("video_id")
+            if video_id:
+                videos[video_id].append(data)
+
+        grouped_scans = []
+        for video_id, attempts in videos.items():
+            attempts_sorted = sorted(
+                attempts,
+                key=lambda x: x.get("started_at") or "",
+                reverse=True
+            )
+            latest = attempts_sorted[0]
+            statuses = [a.get("status") for a in attempts_sorted]
+
+            if "running" in statuses:
+                aggregate_status = "running"
+            elif all(s == "failed" for s in statuses):
+                aggregate_status = "failed"
+            elif "completed" in statuses:
+                aggregate_status = "completed"
+            else:
+                aggregate_status = latest.get("status", "unknown")
+
+            grouped_scan = {
+                **latest,
+                "status": aggregate_status,
+                "attempt_count": len(attempts_sorted),
+                "attempts": attempts_sorted if len(attempts_sorted) > 1 else None,
+            }
+            grouped_scans.append(grouped_scan)
+
+        grouped_scans.sort(key=lambda x: x.get("started_at") or "", reverse=True)
+        paginated_scans = grouped_scans[offset:offset + limit]
+        has_more = len(grouped_scans) > offset + limit
+
+        return {
+            "scan_history": {
+                "scans": paginated_scans,
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more
+            },
+            "processing_videos": processing_videos,
+            "processing_count": len(processing_videos)
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get scan data: {str(e)}")
+
+
 @router.get("/scan-history")
 async def get_scan_history(limit: int = 50, offset: int = 0):
     """
