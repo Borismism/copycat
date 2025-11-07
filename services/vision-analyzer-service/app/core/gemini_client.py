@@ -181,6 +181,31 @@ class GeminiClient:
                     },
                 )
 
+                # Validate response has valid JSON before returning
+                try:
+                    response_text = response.text
+                    response_data = json.loads(response_text)
+
+                    # Check for None values in critical boolean fields
+                    has_invalid_data = False
+                    if "ip_results" in response_data:
+                        for ip_result in response_data["ip_results"]:
+                            if ip_result.get("fair_use_applies") is None or ip_result.get("is_ai_generated") is None:
+                                has_invalid_data = True
+                                break
+
+                    if has_invalid_data and attempt < max_retries - 1:
+                        logger.warning(
+                            f"Gemini returned invalid data (None for boolean fields), "
+                            f"retrying (attempt {attempt + 1}/{max_retries})"
+                        )
+                        await asyncio.sleep(2)  # Short delay before retry
+                        continue
+
+                except (json.JSONDecodeError, KeyError):
+                    # If we can't validate, let the _parse_response handle it
+                    pass
+
                 return response
 
             except google_exceptions.ResourceExhausted as e:
@@ -218,6 +243,21 @@ class GeminiClient:
 
             # Parse JSON
             response_data = json.loads(response_text)
+
+            # Fix None values that should be booleans (Gemini sometimes returns null)
+            if "ip_results" in response_data:
+                for ip_result in response_data["ip_results"]:
+                    # Fix fair_use_applies: None -> False
+                    if ip_result.get("fair_use_applies") is None:
+                        logger.warning(
+                            f"Gemini returned None for fair_use_applies in IP {ip_result.get('ip_id')}, "
+                            "defaulting to False"
+                        )
+                        ip_result["fair_use_applies"] = False
+
+                    # Fix is_ai_generated: None -> False
+                    if ip_result.get("is_ai_generated") is None:
+                        ip_result["is_ai_generated"] = False
 
             # Validate with Pydantic model
             analysis_result = GeminiAnalysisResult(**response_data)
