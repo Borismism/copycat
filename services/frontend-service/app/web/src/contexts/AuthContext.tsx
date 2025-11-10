@@ -1,64 +1,116 @@
-import { createContext, useContext, useState, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+
+export type UserRole = 'admin' | 'editor' | 'legal' | 'read'
 
 export type User = {
-  id: string
-  name: string
   email: string
-  role: 'admin' | 'legal' | 'viewer'
+  name: string | null
+  role: UserRole
+  picture: string | null
 }
 
 type AuthContextType = {
   user: User | null
-  login: (email: string) => void
+  actualUser: User | null  // The real logged-in user (for "Act As")
+  loading: boolean
+  error: string | null
   logout: () => void
+  actAs: (email: string | null) => Promise<void>
+  isActingAs: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-// Mock users for development
-const MOCK_USERS: Record<string, User> = {
-  'admin@copycat.com': {
-    id: '1',
-    name: 'Admin User',
-    email: 'admin@copycat.com',
-    role: 'admin',
-  },
-  'legal@copycat.com': {
-    id: '2',
-    name: 'Legal Team',
-    email: 'legal@copycat.com',
-    role: 'legal',
-  },
-  'viewer@copycat.com': {
-    id: '3',
-    name: 'Viewer',
-    email: 'viewer@copycat.com',
-    role: 'viewer',
-  },
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    // Check localStorage for existing session
-    const stored = localStorage.getItem('mockUser')
-    return stored ? JSON.parse(stored) : null
+  const [user, setUser] = useState<User | null>(null)
+  const [actualUser, setActualUser] = useState<User | null>(null)  // The real user
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [actAsEmail, setActAsEmail] = useState<string | null>(() => {
+    // Restore "Act As" from localStorage
+    return localStorage.getItem('actAsEmail')
   })
 
-  const login = (email: string) => {
-    const mockUser = MOCK_USERS[email.toLowerCase()]
-    if (mockUser) {
-      setUser(mockUser)
-      localStorage.setItem('mockUser', JSON.stringify(mockUser))
+  // Fetch current user from API on mount or when actAsEmail changes
+  useEffect(() => {
+    fetchCurrentUser()
+  }, [actAsEmail])
+
+  const fetchCurrentUser = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      const headers: HeadersInit = {
+        credentials: 'include',
+      }
+
+      // Add X-Act-As header for admin impersonation
+      if (actAsEmail) {
+        headers['X-Act-As'] = actAsEmail
+      }
+
+      const response = await fetch('/api/users/me', {
+        credentials: 'include',
+        headers,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch user: ${response.statusText}`)
+      }
+
+      const userData = await response.json()
+
+      if (actAsEmail) {
+        // If acting as someone, keep track of real user
+        if (!actualUser) {
+          // First time acting as - fetch actual user
+          const actualResponse = await fetch('/api/users/me', {
+            credentials: 'include',
+          })
+          if (actualResponse.ok) {
+            const actualUserData = await actualResponse.json()
+            setActualUser(actualUserData)
+          }
+        }
+        setUser(userData)
+      } else {
+        // Normal mode - user is the actual user
+        setUser(userData)
+        setActualUser(userData)
+      }
+    } catch (err) {
+      console.error('Failed to fetch current user:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch user')
+      setUser(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const actAs = async (email: string | null) => {
+    if (email) {
+      localStorage.setItem('actAsEmail', email)
+      setActAsEmail(email)
+    } else {
+      localStorage.removeItem('actAsEmail')
+      setActAsEmail(null)
+      // Reset to actual user
+      setUser(actualUser)
     }
   }
 
   const logout = () => {
-    setUser(null)
-    localStorage.removeItem('mockUser')
+    // Clear act-as state
+    localStorage.removeItem('actAsEmail')
+    // For IAP, logout redirects to Google's logout URL
+    window.location.href = '/_gcp_iap/clear_login_cookie'
   }
 
+  const isActingAs = actAsEmail !== null
+
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, actualUser, loading, error, logout, actAs, isActingAs }}>
       {children}
     </AuthContext.Provider>
   )

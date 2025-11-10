@@ -61,15 +61,9 @@ variable "youtube_default_region" {
 
 # Discovery Configuration
 variable "discovery_schedule" {
-  description = "Cron schedule for discovery runs"
+  description = "Cron schedule for discovery runs (quota auto-calculated per run)"
   type        = string
   default     = "0 * * * *"
-}
-
-variable "hourly_quota_budget" {
-  description = "YouTube API quota budget per scheduled run"
-  type        = number
-  default     = 417
 }
 
 # Gemini Configuration

@@ -6,6 +6,7 @@ import AnalysisDetailModal from '../components/AnalysisDetailModal'
 import ScanProgressModal from '../components/ScanProgressModal'
 import ActiveScansOverlay from '../components/ActiveScansOverlay'
 import ScanProgressNotification from '../components/ScanProgressNotification'
+import { usePermissions } from '../hooks/usePermissions'
 import type { VideoMetadata, VideoStatus, ChannelProfile, VisionAnalysis } from '../types'
 
 type SortOption = {
@@ -25,6 +26,7 @@ const SORT_OPTIONS: SortOption[] = [
 ]
 
 export default function VideoListPage() {
+  const { canStartScans, user } = usePermissions()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
   const [videos, setVideos] = useState<VideoMetadata[]>([])
@@ -458,10 +460,11 @@ export default function VideoListPage() {
                 {(video.status === 'discovered' || video.status === 'failed') && (
                   <button
                     onClick={() => handleScanVideo(video)}
-                    disabled={scanningInProgress.has(video.video_id)}
+                    disabled={scanningInProgress.has(video.video_id) || !canStartScans}
                     className={`flex items-center justify-center gap-2 w-full text-center px-3 py-2 text-white text-xs font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${
                       video.status === 'failed' ? 'bg-orange-600 hover:bg-orange-700' : 'bg-blue-600 hover:bg-blue-700'
                     }`}
+                    title={!canStartScans ? `${user?.role} role cannot start scans` : ''}
                   >
                     {scanningInProgress.has(video.video_id) ? (
                       <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">

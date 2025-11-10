@@ -10,18 +10,21 @@ from google.cloud import firestore
 from app.core.discovery_client import discovery_client
 from app.core.firestore_client import firestore_client, FirestoreClient, get_firestore_client
 from app.core.config import settings
-from app.models import DiscoveryAnalytics, DiscoveryStats, DiscoveryTriggerRequest, QuotaStatus
+from app.core.auth import get_current_user, require_role
+from app.models import DiscoveryAnalytics, DiscoveryStats, DiscoveryTriggerRequest, QuotaStatus, UserInfo, UserRole
 
 router = APIRouter()
 
 
 @router.post("/trigger", response_model=DiscoveryStats)
-async def trigger_discovery(request: DiscoveryTriggerRequest):
+@require_role(UserRole.ADMIN, UserRole.EDITOR)
+async def trigger_discovery(request: DiscoveryTriggerRequest, user: UserInfo = Depends(get_current_user)):
     """
-    Trigger a discovery run.
+    Trigger a discovery run (admin/editor only).
 
     Args:
         request: Discovery trigger parameters
+        user: Current user (from IAP)
 
     Returns:
         Discovery statistics

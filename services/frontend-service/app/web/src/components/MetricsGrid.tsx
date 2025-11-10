@@ -137,7 +137,7 @@ export default function MetricsGrid({ summary, metrics }: MetricsGridProps) {
 
       <MetricCard
         title="Gemini Budget"
-        value={metrics?.budget_utilization ? `$${metrics.budget_utilization.spent} / $${metrics.budget_utilization.total}` : 'N/A'}
+        value={metrics?.budget_utilization ? `€${metrics.budget_utilization.spent} / €${metrics.budget_utilization.total}` : 'N/A'}
         subtitle={
           metrics?.budget_utilization
             ? `${metrics.budget_utilization.score.toFixed(1)}% utilized`

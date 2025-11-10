@@ -34,9 +34,8 @@ firestore_database         = "copycat"  # Use copycat Firestore database
 youtube_daily_quota        = "10000"  # Default quota
 youtube_default_region     = "EU"     # Europe
 
-# Discovery Schedule (every 2 hours with adaptive budget)
-discovery_schedule      = "0 */2 * * *"  # Every 2 hours
-hourly_quota_budget     = 833            # 10,000 / 12 (adaptive based on usage)
+# Discovery Schedule (every 2 hours, quota auto-calculated)
+discovery_schedule = "0 */2 * * *"  # Every 2 hours (quota distributed optimally per run)
 
 # Gemini Configuration
 gemini_location         = "europe-west1"  # Belgium - Full Gemini 2.5 Flash support

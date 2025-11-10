@@ -74,15 +74,29 @@ class FirestoreClient:
         direction = firestore.Query.DESCENDING if sort_desc else firestore.Query.ASCENDING
         query = query.order_by(sort_by, direction=direction)
 
-        # Execute query and filter deleted videos in Python (since Firestore doesn't support "is null OR false")
+        # OPTIMIZED: Apply limit in Firestore query to reduce data transfer
+        # Fetch slightly more than needed to account for deleted videos
+        fetch_limit = (offset + limit) * 2  # 2x buffer for deleted videos
+        query = query.limit(fetch_limit)
+
+        # Execute query with limit
         all_docs = list(query.stream())
 
         # Filter out deleted videos
         non_deleted_docs = [doc for doc in all_docs if not doc.to_dict().get("deleted", False)]
-        total = len(non_deleted_docs)
 
-        # Apply pagination in Python
+        # Apply pagination in Python (after filtering deleted)
         paginated_docs = non_deleted_docs[offset:offset + limit]
+
+        # Get accurate total from system_stats
+        try:
+            stats_doc = self.db.collection("system_stats").document("global").get()
+            if stats_doc.exists:
+                total = stats_doc.to_dict().get("total_videos", len(non_deleted_docs))
+            else:
+                total = len(non_deleted_docs)
+        except Exception:
+            total = len(non_deleted_docs)
 
         # Convert to VideoMetadata
         videos = []
@@ -97,36 +111,43 @@ class FirestoreClient:
 
         return videos, total
 
-    def _get_all_channel_stats(self) -> tuple[dict[str, int], dict[str, int], dict[str, int], dict[str, int]]:
-        """Calculate video counts, views, infringements, and cleared for ALL channels in one query."""
-        all_videos = self.videos_collection.stream()
+    def _get_channel_stats_for_ids(self, channel_ids: list[str]) -> tuple[dict[str, int], dict[str, int], dict[str, int], dict[str, int]]:
+        """Calculate video counts, views, infringements, and cleared for SPECIFIC channels only."""
         channel_counts = {}
         channel_views = {}
         channel_infringements = {}
         channel_cleared = {}
 
-        for video in all_videos:
-            data = video.to_dict()
-            channel_id = data.get("channel_id")
-            if channel_id:
-                # Count videos
-                channel_counts[channel_id] = channel_counts.get(channel_id, 0) + 1
+        # Query videos ONLY for the specified channels (using 'in' operator)
+        # Firestore 'in' has a limit of 10, so batch if needed
+        batch_size = 10
+        for i in range(0, len(channel_ids), batch_size):
+            batch = channel_ids[i:i + batch_size]
 
-                # Sum views
-                view_count = data.get("view_count", 0)
-                if view_count:
-                    channel_views[channel_id] = channel_views.get(channel_id, 0) + view_count
+            videos = self.videos_collection.where("channel_id", "in", batch).stream()
 
-                # Count infringements and cleared (from actual analysis results)
-                status = data.get("status")
-                if status == "analyzed":
-                    analysis = data.get("analysis")
-                    if analysis and isinstance(analysis, dict):
-                        contains_infringement = analysis.get("contains_infringement", False)
-                        if contains_infringement:
-                            channel_infringements[channel_id] = channel_infringements.get(channel_id, 0) + 1
-                        else:
-                            channel_cleared[channel_id] = channel_cleared.get(channel_id, 0) + 1
+            for video in videos:
+                data = video.to_dict()
+                channel_id = data.get("channel_id")
+                if channel_id:
+                    # Count videos
+                    channel_counts[channel_id] = channel_counts.get(channel_id, 0) + 1
+
+                    # Sum views
+                    view_count = data.get("view_count", 0)
+                    if view_count:
+                        channel_views[channel_id] = channel_views.get(channel_id, 0) + view_count
+
+                    # Count infringements and cleared (from actual analysis results)
+                    status = data.get("status")
+                    if status == "analyzed":
+                        analysis = data.get("analysis")
+                        if analysis and isinstance(analysis, dict):
+                            contains_infringement = analysis.get("contains_infringement", False)
+                            if contains_infringement:
+                                channel_infringements[channel_id] = channel_infringements.get(channel_id, 0) + 1
+                            else:
+                                channel_cleared[channel_id] = channel_cleared.get(channel_id, 0) + 1
 
         return channel_counts, channel_views, channel_infringements, channel_cleared
 
@@ -163,37 +184,69 @@ class FirestoreClient:
         Returns:
             Tuple of (channels list, total count)
         """
-        # Get ALL channels and sort in memory (Firestore emulator has issues with orderBy)
-        all_channels_docs = list(self.channels_collection.stream())
-        total = len(all_channels_docs)
-
-        # Process ALL channels first
         import logging
         logger = logging.getLogger(__name__)
         from datetime import datetime, timezone
 
-        # Get video counts, views, infringements, and cleared for ALL channels in one query
-        channel_video_counts, channel_views_map, channel_infringements_map, channel_cleared_map = self._get_all_channel_stats()
+        # Step 1: Get total count from system_stats
+        try:
+            stats_doc = self.db.collection("system_stats").document("global").get()
+            total_channels = stats_doc.to_dict().get("total_channels", 0) if stats_doc.exists else 0
+        except Exception:
+            total_channels = 0
 
+        # Step 2: Build Firestore query with filters and sorting
+        query = self.channels_collection
+
+        # Apply filters at Firestore level (if supported)
+        if tier:
+            query = query.where("tier", "==", tier.value if hasattr(tier, 'value') else tier)
+
+        # Apply sorting at Firestore level
+        sort_direction = firestore.Query.DESCENDING if sort_desc else firestore.Query.ASCENDING
+
+        # Map API sort fields to Firestore fields
+        firestore_sort_fields = {
+            "risk_score": "channel_risk",
+            "total_videos_found": "total_videos_found",
+            "confirmed_infringements": "confirmed_infringements",
+            "last_scanned_at": "last_scanned_at",
+            "last_seen_at": "last_seen_at",
+        }
+
+        firestore_sort_field = firestore_sort_fields.get(sort_by, "last_seen_at")
+        query = query.order_by(firestore_sort_field, direction=sort_direction)
+
+        # Apply pagination at Firestore level
+        query = query.limit(limit).offset(offset)
+
+        # Execute query
+        channel_docs = list(query.stream())
+
+        # Convert to ChannelProfile objects
         all_channels = []
-        for doc in all_channels_docs:
+        for doc in channel_docs:
             data = doc.to_dict()
             channel_id = data.get("channel_id", doc.id)
 
-            # Get ALL stats from the pre-computed maps (actual video data, not stale channel doc!)
-            total_views = channel_views_map.get(channel_id, 0)
-            actual_video_count = channel_video_counts.get(channel_id, 0)
-            confirmed_infringements = channel_infringements_map.get(channel_id, 0)
-            videos_cleared = channel_cleared_map.get(channel_id, 0)
+            # Use pre-aggregated stats from channel document
+            # These are maintained by discovery-service when videos are discovered
+            total_videos_found = data.get("total_videos_found", 0)
+            total_views = data.get("total_views", 0)
+
+            # For infringements/cleared, we still need to query videos since these change with analysis
+            # TODO: Also pre-aggregate these in vision-analyzer-service
+            confirmed_infringements = data.get("confirmed_infringements", 0)
+            videos_cleared = data.get("videos_cleared", 0)
 
             # Fill in missing fields with defaults
             channel_data = {
                 "channel_id": channel_id,
                 "channel_title": data.get("channel_title", "Unknown"),
                 "discovered_at": data.get("discovered_at", datetime.now(timezone.utc)),  # Required field!
-                "total_videos_found": actual_video_count,  # Use actual count from videos collection
-                "confirmed_infringements": confirmed_infringements,  # Use actual count from analyzed videos
-                "videos_cleared": videos_cleared,  # Use actual count from analyzed videos
+                "total_videos_found": total_videos_found,  # Pre-aggregated
+                "confirmed_infringements": confirmed_infringements,  # Pre-aggregated
+                "videos_cleared": videos_cleared,  # Pre-aggregated
                 "last_infringement_date": data.get("last_infringement_date"),
                 "infringement_rate": data.get("infringement_rate", 0.0),
                 "risk_score": data.get("channel_risk", 0),
@@ -219,37 +272,9 @@ class FirestoreClient:
                 # Skip invalid channels
                 continue
 
-        # Apply filters
-        filtered_channels = all_channels
-        if min_risk is not None:
-            filtered_channels = [ch for ch in filtered_channels if ch.risk_score >= min_risk]
-        if tier:
-            filtered_channels = [ch for ch in filtered_channels if ch.tier == tier]
-        if action_status:
-            filtered_channels = [ch for ch in filtered_channels if ch.action_status == action_status]
-
-        # Update total to reflect filtered count
-        filtered_total = len(filtered_channels)
-
-        # Sort in memory
-        sort_key_map = {
-            "video_count": lambda ch: ch.total_videos_found,
-            "total_videos_found": lambda ch: ch.total_videos_found,
-            "risk_score": lambda ch: ch.risk_score,
-            "confirmed_infringements": lambda ch: ch.confirmed_infringements or 0,
-            "last_scanned_at": lambda ch: ch.last_scanned_at or datetime.min.replace(tzinfo=timezone.utc),
-            "discovered_at": lambda ch: ch.discovered_at,
-            "last_seen_at": lambda ch: ch.last_upload_date or datetime.min.replace(tzinfo=timezone.utc),
-        }
-
-        sort_key_func = sort_key_map.get(sort_by, lambda ch: ch.total_videos_found)
-        filtered_channels.sort(key=sort_key_func, reverse=sort_desc)
-
-        # Apply pagination
-        paginated_channels = filtered_channels[offset:offset+limit]
-
-        logger.info(f"Returning {len(paginated_channels)} channels out of {filtered_total} filtered (total in DB: {total})")
-        return paginated_channels, filtered_total
+        # Filtering/sorting/pagination already done at Firestore level
+        logger.info(f"Returning {len(all_channels)} channels (total in DB: {total_channels})")
+        return all_channels, total_channels
 
     async def get_channel_stats(self) -> ChannelStats:
         """Get channel tier distribution statistics."""
@@ -311,13 +336,33 @@ class FirestoreClient:
         now = datetime.now(timezone.utc)
         yesterday = now - timedelta(hours=24)
 
-        # Count videos discovered in last 24h
-        videos_discovered = len(
-            list(self.videos_collection.where("discovered_at", ">=", yesterday).stream())
-        )
+        # Count videos discovered in last 24h - USE AGGREGATION!
+        from google.cloud.firestore_v1.aggregation import AggregationQuery
 
-        # Count unique channels
-        channels_tracked = len(list(self.channels_collection.stream()))
+        try:
+            query = self.videos_collection.where("discovered_at", ">=", yesterday)
+            agg_query = AggregationQuery(query)
+            agg_query.count(alias="total")
+            result = agg_query.get()
+            videos_discovered = result[0][0].value if result else 0
+        except Exception:
+            videos_discovered = 0
+
+        # Get total channels from system_stats (faster than aggregation)
+        try:
+            stats_doc = self.db.collection("system_stats").document("global").get()
+            if stats_doc.exists:
+                channels_tracked = stats_doc.to_dict().get("total_channels", 0)
+            else:
+                # Fallback: count channels using aggregation
+                query = self.channels_collection
+                agg_query = AggregationQuery(query)
+                agg_query.count(alias="total")
+                result = agg_query.get()
+                channels_tracked = result[0][0].value if result else 0
+        except Exception as e:
+            logger.warning(f"Failed to get channel count: {e}")
+            channels_tracked = 0
 
         # Get today's quota usage from quota_usage collection
         today_key = now.strftime("%Y-%m-%d")
@@ -330,42 +375,17 @@ class FirestoreClient:
         # Get last discovery run stats
         last_run = await self.get_last_discovery_run()
 
-        # Count videos analyzed in last 24h (status = "analyzed")
+        # Count videos analyzed (use system_stats for fast O(1) lookup)
         videos_analyzed = 0
         infringements_found = 0
 
-        try:
-            analyzed_videos = self.videos_collection.where("status", "==", "analyzed").stream()
-
-            for video_doc in analyzed_videos:
-                video_data = video_doc.to_dict()
-
-                # Check if analyzed in last 24h
-                last_analyzed = video_data.get("last_analyzed_at") or video_data.get("updated_at")
-                if last_analyzed:
-                    # Handle both datetime and string timestamps
-                    if isinstance(last_analyzed, str):
-                        from dateutil import parser
-                        last_analyzed = parser.isoparse(last_analyzed)
-
-                    # Ensure timezone-aware comparison
-                    if last_analyzed.tzinfo is None:
-                        last_analyzed = last_analyzed.replace(tzinfo=timezone.utc)
-
-                    if last_analyzed >= yesterday:
-                        videos_analyzed += 1
-
-                        # Check for infringement (from analysis field with multi-IP format)
-                        analysis = video_data.get("analysis", {})
-                        if isinstance(analysis, dict) and analysis.get("ip_results"):
-                            # Multi-IP format: check if any IP has infringement
-                            for ip_result in analysis.get("ip_results", []):
-                                if ip_result.get("contains_infringement"):
-                                    infringements_found += 1
-                                    break
-        except Exception:
-            # If query fails, return 0 (vision analyzer may not be deployed yet)
-            pass
+        # Get stats from system_stats document (O(1) - much faster than querying!)
+        stats_doc = self.db.collection("system_stats").document("global").get()
+        if stats_doc.exists:
+            stats_data = stats_doc.to_dict()
+            # Get total analyzed from aggregated stats (updated by vision-analyzer)
+            videos_analyzed = stats_data.get("total_analyzed", 0)
+            infringements_found = stats_data.get("total_infringements", 0)
 
         return {
             "videos_discovered": videos_discovered,

@@ -30,7 +30,7 @@ class BudgetManager:
     No hard rate limits! System scales automatically based on availability.
     """
 
-    DAILY_BUDGET_USD = settings.daily_budget_usd
+    DAILY_BUDGET_EUR = settings.daily_budget_eur
 
     def __init__(self, firestore_client: firestore.Client):
         """
@@ -48,38 +48,38 @@ class BudgetManager:
         self._video_count: int = 0
         self._start_time: float = datetime.now(timezone.utc).timestamp()
 
-        logger.info(f"Budget manager initialized: daily_budget=${self.DAILY_BUDGET_USD}")
+        logger.info(f"Budget manager initialized: daily_budget=€{self.DAILY_BUDGET_EUR}")
 
-    def can_afford(self, estimated_cost_usd: float) -> bool:
+    def can_afford(self, estimated_cost_eur: float) -> bool:
         """
         Check if we can afford to analyze a video.
 
         Args:
-            estimated_cost_usd: Estimated cost for the video
+            estimated_cost_eur: Estimated cost for the video in EUR
 
         Returns:
             True if within budget, False if would exceed
         """
         current_total = self.get_daily_total()
-        would_exceed = (current_total + estimated_cost_usd) > self.DAILY_BUDGET_USD
+        would_exceed = (current_total + estimated_cost_eur) > self.DAILY_BUDGET_EUR
 
         if would_exceed:
             logger.info(
-                f"Budget check failed: current=${current_total:.2f}, "
-                f"estimated=${estimated_cost_usd:.4f}, "
-                f"would_total=${current_total + estimated_cost_usd:.2f}, "
-                f"limit=${self.DAILY_BUDGET_USD}"
+                f"Budget check failed: current=€{current_total:.2f}, "
+                f"estimated=€{estimated_cost_eur:.4f}, "
+                f"would_total=€{current_total + estimated_cost_eur:.2f}, "
+                f"limit=€{self.DAILY_BUDGET_EUR}"
             )
 
         return not would_exceed
 
-    def record_usage(self, video_id: str, actual_cost_usd: float):
+    def record_usage(self, video_id: str, actual_cost_eur: float):
         """
         Record actual cost after video analysis.
 
         Args:
             video_id: Video that was analyzed
-            actual_cost_usd: Actual cost incurred
+            actual_cost_eur: Actual cost incurred in EUR
         """
         today = self._get_today_key()
 
@@ -91,7 +91,8 @@ class BudgetManager:
             doc_ref.set(
                 {
                     "date": today,
-                    "total_spent_usd": firestore.Increment(actual_cost_usd),
+                    "total_spent_eur": firestore.Increment(actual_cost_eur),
+                    "daily_budget_eur": self.DAILY_BUDGET_EUR,
                     "video_count": firestore.Increment(1),
                     "last_updated": datetime.now(timezone.utc),
                 },
@@ -99,12 +100,12 @@ class BudgetManager:
             )
 
             # Update cache
-            self._cached_total += actual_cost_usd
+            self._cached_total += actual_cost_eur
             self._video_count += 1
 
             logger.info(
-                f"Recorded usage: video={video_id}, cost=${actual_cost_usd:.4f}, "
-                f"daily_total=${self._cached_total:.2f}/{self.DAILY_BUDGET_USD}"
+                f"Recorded usage: video={video_id}, cost=€{actual_cost_eur:.4f}, "
+                f"daily_total=€{self._cached_total:.2f}/€{self.DAILY_BUDGET_EUR}"
             )
 
         except Exception as e:
@@ -116,7 +117,7 @@ class BudgetManager:
         Get total spent today.
 
         Returns:
-            Total spent in USD
+            Total spent in EUR
         """
         today = self._get_today_key()
 
@@ -131,7 +132,7 @@ class BudgetManager:
 
             if doc.exists:
                 data = doc.to_dict()
-                total = data.get("total_spent_usd", 0.0)
+                total = data.get("total_spent_eur", 0.0)
                 video_count = data.get("video_count", 0)
             else:
                 total = 0.0
@@ -154,9 +155,9 @@ class BudgetManager:
         Get remaining budget for today.
 
         Returns:
-            Remaining budget in USD
+            Remaining budget in EUR
         """
-        remaining = max(0, self.DAILY_BUDGET_USD - self.get_daily_total())
+        remaining = max(0, self.DAILY_BUDGET_EUR - self.get_daily_total())
         return remaining
 
     def get_utilization_percent(self) -> float:
@@ -167,7 +168,7 @@ class BudgetManager:
             Utilization as percentage (0-100)
         """
         total = self.get_daily_total()
-        utilization = (total / self.DAILY_BUDGET_USD) * 100
+        utilization = (total / self.DAILY_BUDGET_EUR) * 100
         return min(100, utilization)
 
     def get_video_count_today(self) -> int:
@@ -214,9 +215,9 @@ class BudgetManager:
 
         return {
             "date": self._get_today_key(),
-            "daily_budget_usd": self.DAILY_BUDGET_USD,
-            "total_spent_usd": round(total, 2),
-            "remaining_usd": round(remaining, 2),
+            "daily_budget_eur": self.DAILY_BUDGET_EUR,
+            "total_spent_eur": round(total, 2),
+            "remaining_eur": round(remaining, 2),
             "utilization_percent": round(utilization, 1),
             "videos_analyzed": video_count,
             "avg_cost_per_video": round(avg_cost, 4),

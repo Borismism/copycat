@@ -8,20 +8,34 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
-  const { user, login, logout } = useAuth()
-  const [showLoginModal, setShowLoginModal] = useState(false)
+  const { user, actualUser, loading, logout, actAs, isActingAs } = useAuth()
+  const [showActAsModal, setShowActAsModal] = useState(false)
+  const [actAsEmail, setActAsEmail] = useState('')
 
   const navLinks = [
     { path: '/', label: 'Home' },
-    { path: '/dashboards', label: 'Dashboards' },
+    { path: '/dashboards', label: 'Services' },
     { path: '/config', label: 'IP Configuration' },
     { path: '/videos', label: 'Videos' },
     { path: '/channels', label: 'Enforcement' },
   ]
 
-  const handleLogin = (email: string) => {
-    login(email)
-    setShowLoginModal(false)
+  // Add admin-only routes (check actualUser for real admin, not impersonated)
+  if (actualUser?.role === 'admin') {
+    navLinks.push({ path: '/admin/roles', label: 'User Roles' })
+  }
+
+  const handleActAs = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (actAsEmail.trim()) {
+      await actAs(actAsEmail.trim())
+      setShowActAsModal(false)
+      setActAsEmail('')
+    }
+  }
+
+  const handleStopActingAs = async () => {
+    await actAs(null)
   }
 
   return (
@@ -35,12 +49,49 @@ export default function Layout({ children }: LayoutProps) {
               <div className="text-sm text-gray-500">AI Content Detection System</div>
             </div>
             <div className="flex items-center gap-4">
-              {user ? (
+              {loading ? (
+                <div className="text-sm text-gray-500">Loading...</div>
+              ) : user ? (
                 <>
-                  <span className="text-sm text-gray-700">
-                    <span className="font-medium">{user.name}</span>
-                    <span className="text-gray-500 ml-2">({user.role})</span>
-                  </span>
+                  {/* Act As Banner */}
+                  {isActingAs && (
+                    <div className="flex items-center gap-2 px-3 py-1 bg-yellow-100 border border-yellow-300 rounded-lg">
+                      <span className="text-sm font-medium text-yellow-900">
+                        Acting as: {user.email}
+                      </span>
+                      <button
+                        onClick={handleStopActingAs}
+                        className="text-xs px-2 py-0.5 bg-yellow-200 hover:bg-yellow-300 text-yellow-900 rounded transition-colors"
+                      >
+                        Stop
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    {user.picture && (
+                      <img
+                        src={user.picture}
+                        alt={user.name || user.email}
+                        className="w-8 h-8 rounded-full"
+                      />
+                    )}
+                    <div className="text-sm">
+                      <div className="font-medium text-gray-900">{user.name || user.email}</div>
+                      <div className="text-gray-500 capitalize">{user.role}</div>
+                    </div>
+                  </div>
+
+                  {/* Admin "Act As" button */}
+                  {actualUser?.role === 'admin' && !isActingAs && (
+                    <button
+                      onClick={() => setShowActAsModal(true)}
+                      className="px-3 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                    >
+                      Act As
+                    </button>
+                  )}
+
                   <button
                     onClick={logout}
                     className="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
@@ -49,12 +100,7 @@ export default function Layout({ children }: LayoutProps) {
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={() => setShowLoginModal(true)}
-                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Login
-                </button>
+                <div className="text-sm text-red-600">Not authenticated</div>
               )}
             </div>
           </div>
@@ -84,43 +130,50 @@ export default function Layout({ children }: LayoutProps) {
       {/* Main content */}
       <main className="container mx-auto px-4 py-8 sm:px-6 lg:px-8" style={{ maxWidth: '1400px' }}>{children}</main>
 
-      {/* Login Modal */}
-      {showLoginModal && (
+      {/* Act As Modal */}
+      {showActAsModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">Mock Login</h3>
-            <p className="text-sm text-gray-600 mb-6">
-              Select a mock user to login as:
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Act As User</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Enter the email address of the user you want to impersonate. This is an admin-only feature for testing role-based permissions.
             </p>
-            <div className="space-y-3">
-              <button
-                onClick={() => handleLogin('admin@copycat.com')}
-                className="w-full px-4 py-3 text-left bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-              >
-                <div className="font-medium text-gray-900">Admin User</div>
-                <div className="text-sm text-gray-600">admin@copycat.com (Full access)</div>
-              </button>
-              <button
-                onClick={() => handleLogin('legal@copycat.com')}
-                className="w-full px-4 py-3 text-left bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-              >
-                <div className="font-medium text-gray-900">Legal Team</div>
-                <div className="text-sm text-gray-600">legal@copycat.com (Enforcement access)</div>
-              </button>
-              <button
-                onClick={() => handleLogin('viewer@copycat.com')}
-                className="w-full px-4 py-3 text-left bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
-              >
-                <div className="font-medium text-gray-900">Viewer</div>
-                <div className="text-sm text-gray-600">viewer@copycat.com (Read-only)</div>
-              </button>
-            </div>
-            <button
-              onClick={() => setShowLoginModal(false)}
-              className="mt-4 w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-            >
-              Cancel
-            </button>
+
+            <form onSubmit={handleActAs} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  User Email
+                </label>
+                <input
+                  type="email"
+                  value={actAsEmail}
+                  onChange={(e) => setActAsEmail(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="user@example.com"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowActAsModal(false)
+                    setActAsEmail('')
+                  }}
+                  className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                >
+                  Act As
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

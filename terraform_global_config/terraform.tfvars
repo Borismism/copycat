@@ -28,10 +28,9 @@ iap_authorized_users = [
 youtube_daily_quota        = "10000"  # Request increase via GCP Console if needed
 youtube_default_region     = "EU"
 
-# Discovery Schedule (every hour for production)
-discovery_schedule      = "0 * * * *"  # Every hour
-hourly_quota_budget     = 417          # 10,000 / 24
+# Discovery Schedule (every hour, quota auto-calculated)
+discovery_schedule = "0 * * * *"  # Every hour (quota distributed optimally per run)
 
 # Gemini Configuration
 gemini_location         = "us-central1"  # Primary region for Gemini models
-daily_budget_usd        = "260"  # €240 ≈ $260 for full production
+daily_budget_eur        = "260"  # €260 for full production

@@ -30,5 +30,8 @@ youtube_daily_quota     = "10000" # Default quota (request increase if needed)
 youtube_default_region  = "US"    # Target region for discovery
 
 # Cloud Scheduler Configuration
-discovery_schedule    = "0 * * * *" # Every hour at minute 0
-hourly_quota_budget   = 417         # 10,000 / 24 hours ≈ 417 units/hour
+# Quota is automatically calculated per run based on:
+# - Remaining daily quota
+# - Hours left until midnight UTC
+# - Ensures perfect 100% quota utilization
+discovery_schedule = "0 * * * *" # Every hour at minute 0

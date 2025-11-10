@@ -29,7 +29,7 @@ variable "image_name" {
 variable "min_instances" {
   description = "Minimum number of instances"
   type        = number
-  default     = 0
+  default     = 1  # Keep 1 instance warm to avoid cold starts
 }
 
 variable "max_instances" {

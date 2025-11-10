@@ -42,13 +42,83 @@ class ResultProcessor:
 
         self.videos_collection = settings.firestore_videos_collection
         self.feedback_topic = settings.pubsub_feedback_topic
+        self.hourly_stats_collection = "hourly_stats"
 
         # Construct topic path
         self.feedback_topic_path = self.publisher.topic_path(
             settings.gcp_project_id, self.feedback_topic
         )
 
+    def _increment_hourly_stat(self, stat_type: str, timestamp: datetime | None = None, increment: int = 1, cost_usd: float = 0.0, processing_time: float = 0.0):
+        """
+        Atomically increment (or decrement) hourly stats counter in Firestore.
+
+        Args:
+            stat_type: Type of stat to increment ("analyses", "infringements")
+            timestamp: Timestamp to use (defaults to now)
+            increment: Amount to increment (can be negative for decrement)
+            cost_usd: Cost in USD to add to total_cost_usd
+            processing_time: Processing time in seconds to add to total_processing_time
+        """
+        try:
+            if timestamp is None:
+                timestamp = datetime.now(timezone.utc)
+
+            # Round to hour
+            hour = timestamp.replace(minute=0, second=0, microsecond=0)
+            hour_key = hour.strftime("%Y-%m-%d_%H")  # e.g., "2025-11-07_10"
+
+            stats_ref = self.firestore.collection(self.hourly_stats_collection).document(hour_key)
+
+            # Atomic increment (supports negative values for decrement)
+            update_data = {
+                "hour": hour,
+                stat_type: firestore.Increment(increment),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+
+            # Add cost and processing time if provided
+            if cost_usd > 0:
+                update_data["total_cost_usd"] = firestore.Increment(cost_usd)
+            if processing_time > 0:
+                update_data["total_processing_time"] = firestore.Increment(processing_time)
+
+            stats_ref.set(update_data, merge=True)
+
+        except Exception as e:
+            # Don't fail the main operation if stats update fails
+            logger.warning(f"Failed to increment hourly stat {stat_type}: {e}")
+
         logger.info("Result processor initialized")
+
+    async def _update_system_stats(self, has_infringement: bool):
+        """
+        Atomically increment global system stats counters.
+
+        This provides O(1) lookups for dashboard metrics without expensive queries.
+
+        Args:
+            has_infringement: Whether this analysis found an infringement
+        """
+        try:
+            stats_ref = self.firestore.collection("system_stats").document("global")
+
+            # Atomic increments - always thread-safe and efficient
+            update_data = {
+                "total_analyzed": firestore.Increment(1),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }
+
+            if has_infringement:
+                update_data["total_infringements"] = firestore.Increment(1)
+
+            stats_ref.set(update_data, merge=True)
+
+            logger.debug(f"Updated system stats: +1 analyzed, infringement={has_infringement}")
+
+        except Exception as e:
+            # Don't fail the main operation if stats update fails
+            logger.warning(f"Failed to update system stats: {e}")
 
     async def process_result(self, result: VisionAnalysisResult, channel_id: str = None, view_count: int = 0):
         """
@@ -74,8 +144,30 @@ class ResultProcessor:
         )
 
         try:
-            # 1. Store basic analysis in Firestore
+            # 1. Fetch video document FIRST to check previous state (before updating)
             doc_ref = self.firestore.collection("videos").document(result.video_id)
+            video_doc = doc_ref.get()
+
+            # Determine if this is a re-scan
+            was_previously_analyzed = False
+            previous_had_infringement = None
+
+            if video_doc.exists:
+                video_data = video_doc.to_dict()
+                was_previously_analyzed = video_data.get("status") == "analyzed"
+
+                # Get previous infringement status if it was analyzed before
+                if was_previously_analyzed:
+                    previous_analysis = video_data.get("analysis", {})
+                    if isinstance(previous_analysis, dict):
+                        previous_had_infringement = previous_analysis.get("contains_infringement", False)
+
+                # Get channel_id and view_count if not provided
+                if not channel_id:
+                    channel_id = video_data.get("channel_id")
+                    view_count = video_data.get("view_count", 0)
+
+            # 2. Now update the document with new analysis
             doc_ref.update({
                 "analysis": {
                     "analyzed_at": result.analyzed_at,
@@ -93,29 +185,42 @@ class ResultProcessor:
 
             logger.debug(f"Stored multi-IP result in Firestore: {result.video_id}")
 
-            # 2. Publish feedback to risk-analyzer (always, even if no infringement)
+            # 3. Publish feedback to risk-analyzer (always, even if no infringement)
             # Risk analyzer needs to know about all results to update channel reputation
-            if not channel_id:
-                # Fetch channel_id from Firestore if not provided
-                video_doc = doc_ref.get()
-                if video_doc.exists:
-                    video_data = video_doc.to_dict()
-                    channel_id = video_data.get("channel_id")
-                    view_count = video_data.get("view_count", 0)
-
             if channel_id:
                 await self._publish_feedback(result, channel_id)
             else:
                 logger.warning(f"No channel_id available for video {result.video_id}, skipping feedback")
 
-            # 3. ALWAYS update channel stats (both clean and infringing videos)
-            await self._update_channel_scan_stats(channel_id, has_infringement, view_count)
+            # 4. Update global system stats (O(1) atomic increment)
+            await self._update_system_stats(has_infringement)
 
-            # 4. Update infringement tracking if violation found
+            # 5. Update hourly stats for Activity Timeline
+            if was_previously_analyzed and previous_had_infringement is not None:
+                # Re-scan: adjust counters if infringement status changed
+                if previous_had_infringement and not has_infringement:
+                    # Was infringement, now cleared - decrement infringements
+                    self._increment_hourly_stat("infringements", timestamp=result.analyzed_at, increment=-1)
+                    logger.debug(f"Hourly stats: video {result.video_id} reclassified from infringement to cleared")
+                elif not previous_had_infringement and has_infringement:
+                    # Was cleared, now infringement - increment infringements
+                    self._increment_hourly_stat("infringements", timestamp=result.analyzed_at)
+                    logger.debug(f"Hourly stats: video {result.video_id} reclassified from cleared to infringement")
+                # else: same result, no change to hourly stats
+            else:
+                # First-time analysis: increment both analyses and infringements (if applicable)
+                self._increment_hourly_stat("analyses", timestamp=result.analyzed_at)
+                if has_infringement:
+                    self._increment_hourly_stat("infringements", timestamp=result.analyzed_at)
+
+            # 6. ALWAYS update channel stats (both clean and infringing videos)
+            await self._update_channel_scan_stats(channel_id, has_infringement, view_count, result.video_id)
+
+            # 7. Update infringement tracking if violation found
             if has_infringement:
                 await self._update_channel_infringement_tracking(result, channel_id, view_count)
 
-                # 5. Alert on high confidence infringements
+                # 8. Alert on high confidence infringements
                 if max_likelihood >= 80:
                     await self._alert_high_confidence_infringement(result)
 
@@ -166,6 +271,16 @@ class ResultProcessor:
             }
 
             doc_ref.update(update_data)
+
+            # Increment hourly stats with cost and processing time
+            self._increment_hourly_stat(
+                "analyses",
+                timestamp=result.analyzed_at,
+                cost_usd=result.metrics.cost_usd,
+                processing_time=result.metrics.processing_time_seconds
+            )
+            if result.analysis.contains_infringement:
+                self._increment_hourly_stat("infringements", timestamp=result.analyzed_at)
 
             logger.debug(f"Stored result in Firestore: {result.video_id}")
 
@@ -297,43 +412,79 @@ class ResultProcessor:
             # Don't raise - feedback is important but not critical
             # Log error but continue
 
-    async def _update_channel_scan_stats(self, channel_id: str, has_infringement: bool, view_count: int):
+    async def _update_channel_scan_stats(self, channel_id: str, has_infringement: bool, view_count: int, video_id: str = None):
         """
         Update channel scan statistics (ALWAYS called, regardless of infringement).
 
         This increments videos_scanned counter which is used by the risk calculator
         to LOWER risk for channels with many clean scans.
 
+        IMPORTANT: For re-scans, decrements old classification and increments new one.
+
         Args:
             channel_id: Channel ID
             has_infringement: Whether this video had an infringement
             view_count: Current view count of the video
+            video_id: Video ID (used to check previous classification)
         """
         try:
             if not channel_id:
                 logger.warning(f"No channel_id provided, cannot update channel stats")
                 return
 
+            # Check if this is a re-scan (video was already analyzed)
+            was_previously_analyzed = False
+            previous_had_infringement = None
+
+            if video_id:
+                video_ref = self.firestore.collection("videos").document(video_id)
+                video_doc = video_ref.get()
+                if video_doc.exists:
+                    video_data = video_doc.to_dict()
+                    if video_data.get("status") == "analyzed":
+                        # Video was analyzed before
+                        was_previously_analyzed = True
+                        # Check what the previous result was
+                        analysis = video_data.get("analysis", {})
+                        if isinstance(analysis, dict):
+                            previous_had_infringement = analysis.get("contains_infringement", False)
+
             # Update channel document
             channel_ref = self.firestore.collection("channels").document(channel_id)
 
-            # Always increment videos_scanned
-            # Also track clean vs infringing (for frontend display)
             update_data = {
-                "videos_scanned": firestore.Increment(1),
                 "last_scanned_at": firestore.SERVER_TIMESTAMP,
             }
 
-            # Update confirmed_infringements or videos_cleared (for frontend)
-            if has_infringement:
-                update_data["confirmed_infringements"] = firestore.Increment(1)
+            if was_previously_analyzed and previous_had_infringement is not None:
+                # Re-scan: decrement old classification, increment new one
+                if previous_had_infringement and not has_infringement:
+                    # Was infringement, now cleared
+                    update_data["confirmed_infringements"] = firestore.Increment(-1)
+                    update_data["videos_cleared"] = firestore.Increment(1)
+                    logger.info(f"Video {video_id} reclassified: infringement → cleared")
+                elif not previous_had_infringement and has_infringement:
+                    # Was cleared, now infringement
+                    update_data["videos_cleared"] = firestore.Increment(-1)
+                    update_data["confirmed_infringements"] = firestore.Increment(1)
+                    logger.info(f"Video {video_id} reclassified: cleared → infringement")
+                else:
+                    # Same classification - no change needed
+                    logger.debug(f"Video {video_id} re-analyzed with same result: infringement={has_infringement}")
             else:
-                update_data["videos_cleared"] = firestore.Increment(1)
+                # First-time scan: increment videos_scanned and classification
+                update_data["videos_scanned"] = firestore.Increment(1)
+
+                if has_infringement:
+                    update_data["confirmed_infringements"] = firestore.Increment(1)
+                else:
+                    update_data["videos_cleared"] = firestore.Increment(1)
 
             channel_ref.update(update_data)
 
             logger.info(
-                f"Updated channel {channel_id} scan stats: +1 scanned, infringement={has_infringement}"
+                f"Updated channel {channel_id} scan stats: infringement={has_infringement}, "
+                f"was_rescan={was_previously_analyzed}"
             )
 
         except Exception as e:

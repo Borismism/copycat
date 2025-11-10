@@ -66,7 +66,7 @@ variable "timeout_seconds" {
 variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
-  default     = 1 # Run one discovery at a time
+  default     = 10 # Allow health checks + multiple API calls while discovery runs in background
 }
 
 # YouTube API Configuration
@@ -84,15 +84,9 @@ variable "youtube_default_region" {
 
 # Cloud Scheduler Configuration
 variable "discovery_schedule" {
-  description = "Cron schedule for discovery runs"
+  description = "Cron schedule for discovery runs (quota auto-calculated per run)"
   type        = string
   default     = "0 * * * *" # Every hour at minute 0
-}
-
-variable "hourly_quota_budget" {
-  description = "YouTube API quota budget per hour (daily quota / 24)"
-  type        = number
-  default     = 417 # 10,000 / 24 ≈ 417
 }
 
 variable "state_bucket" {

@@ -111,16 +111,16 @@ resource "google_cloud_run_v2_service" "discovery_service" {
         value = local.app_source_hash
       }
 
-      # Health check probes
+      # Health probes with very long timeouts - allow up to 15 minutes of unresponsiveness
       startup_probe {
         http_get {
           path = "/health"
           port = 8080
         }
-        initial_delay_seconds = 5
-        timeout_seconds       = 3
-        period_seconds        = 10
-        failure_threshold     = 3
+        initial_delay_seconds = 10
+        timeout_seconds       = 30
+        period_seconds        = 240  # Check every 4 minutes
+        failure_threshold     = 5    # Allow 20 minutes total (5 * 4min)
       }
 
       liveness_probe {
@@ -128,10 +128,10 @@ resource "google_cloud_run_v2_service" "discovery_service" {
           path = "/health"
           port = 8080
         }
-        initial_delay_seconds = 10
-        timeout_seconds       = 3
-        period_seconds        = 30
-        failure_threshold     = 3
+        initial_delay_seconds = 60
+        timeout_seconds       = 30
+        period_seconds        = 240  # Check every 4 minutes
+        failure_threshold     = 5    # Allow 20 minutes total (5 * 4min)
       }
     }
 

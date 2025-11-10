@@ -48,8 +48,85 @@ class VideoProcessor:
         self.topic_path = topic_path
         self.channel_tracker = channel_tracker
         self.videos_collection = "videos"
+        self.hourly_stats_collection = "hourly_stats"
 
         logger.info("VideoProcessor initialized")
+
+    def _increment_hourly_stat(self, stat_type: str, timestamp: datetime | None = None):
+        """
+        Atomically increment hourly stats counter in Firestore.
+
+        Args:
+            stat_type: Type of stat to increment ("discoveries", "analyses", "infringements")
+            timestamp: Timestamp to use (defaults to now)
+        """
+        try:
+            if timestamp is None:
+                timestamp = datetime.now(timezone.utc)
+
+            # Round to hour
+            hour = timestamp.replace(minute=0, second=0, microsecond=0)
+            hour_key = hour.strftime("%Y-%m-%d_%H")  # e.g., "2025-11-07_10"
+
+            stats_ref = self.firestore.collection(self.hourly_stats_collection).document(hour_key)
+
+            # Atomic increment
+            stats_ref.set({
+                "hour": hour,
+                stat_type: firestore.Increment(1),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+
+        except Exception as e:
+            # Don't fail the main operation if stats update fails
+            logger.warning(f"Failed to increment hourly stat {stat_type}: {e}")
+
+    def _update_channel_stats(self, metadata: VideoMetadata):
+        """
+        Update channel aggregate stats when a new video is discovered.
+
+        Args:
+            metadata: Video metadata
+        """
+        try:
+            channel_ref = self.firestore.collection("channels").document(metadata.channel_id)
+
+            # Atomic increments for channel stats
+            channel_ref.set({
+                "channel_id": metadata.channel_id,
+                "channel_title": metadata.channel_title,
+                "total_videos_found": firestore.Increment(1),
+                "total_views": firestore.Increment(metadata.view_count or 0),
+                "last_seen_at": datetime.now(timezone.utc),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+
+            logger.debug(f"Updated channel stats for {metadata.channel_id}")
+
+        except Exception as e:
+            # Don't fail the main operation if stats update fails
+            logger.warning(f"Failed to update channel stats: {e}")
+
+    def _increment_global_stat(self, stat_name: str, increment: int = 1):
+        """
+        Atomically increment global statistics counter.
+
+        Args:
+            stat_name: Name of the stat to increment (e.g., "total_videos", "total_channels")
+            increment: Amount to increment by
+        """
+        try:
+            stats_ref = self.firestore.collection("system_stats").document("global")
+
+            # Atomic increment
+            stats_ref.set({
+                stat_name: firestore.Increment(increment),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+
+        except Exception as e:
+            # Don't fail the main operation if stats update fails
+            logger.warning(f"Failed to increment global stat {stat_name}: {e}")
 
     def extract_metadata(self, video_data: dict[str, Any]) -> VideoMetadata:
         """
@@ -439,6 +516,15 @@ class VideoProcessor:
 
             doc_ref.set(video_doc)
             logger.info(f"Saved video {metadata.video_id} to Firestore")
+
+            # Increment hourly discoveries counter
+            self._increment_hourly_stat("discoveries")
+
+            # Update channel stats (video count, views, etc.)
+            self._update_channel_stats(metadata)
+
+            # Increment global video count
+            self._increment_global_stat("total_videos", 1)
 
             # Publish to PubSub
             message_data = metadata.model_dump_json().encode("utf-8")

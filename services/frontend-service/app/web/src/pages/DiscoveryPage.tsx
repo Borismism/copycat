@@ -4,10 +4,10 @@ import { Link } from 'react-router-dom'
 import { discoveryAPI } from '../api/discovery'
 import { statusAPI } from '../api/status'
 import type { QuotaStatus } from '../types'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function DiscoveryPage() {
-  const [quota, setQuota] = useState<QuotaStatus | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { user } = useAuth()
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [maxQuotaInput, setMaxQuotaInput] = useState<string>('1000')
@@ -29,20 +29,35 @@ export default function DiscoveryPage() {
     { refreshInterval: 30000 }
   )
 
-  // Load initial data on mount
-  useEffect(() => {
-    loadQuota()
-  }, [])
+  // Fetch quota with auto-refresh (every 30 seconds)
+  const { data: quota, isLoading: quotaLoading } = useSWR(
+    'discovery-quota',
+    () => discoveryAPI.getQuota(),
+    { refreshInterval: 30000 }
+  )
 
   // Load discovery history
-  const loadHistory = useCallback(async (offset: number = 0) => {
+  const loadHistory = useCallback(async (offset: number = 0, isRefresh: boolean = false) => {
     if (historyLoading) return
     setHistoryLoading(true)
     try {
       const response = await fetch(`/api/discovery/history?limit=${historyLimit}&offset=${offset}`)
       const data = await response.json()
       if (data.runs && data.runs.length > 0) {
-        setHistory(prev => offset === 0 ? data.runs : [...prev, ...data.runs])
+        setHistory(prev => {
+          if (offset === 0) {
+            // For refresh: only update if we haven't scrolled (preserves pagination)
+            if (isRefresh && prev.length > historyLimit) {
+              // Update only the first page, keep the rest
+              return [...data.runs, ...prev.slice(historyLimit)]
+            }
+            // For initial load: replace all and reset offset
+            setHistoryOffset(historyLimit)
+            return data.runs
+          }
+          // For pagination: append
+          return [...prev, ...data.runs]
+        })
         setHasMoreHistory(data.runs.length === historyLimit)
         if (offset > 0) {
           setHistoryOffset(offset + historyLimit)
@@ -59,8 +74,8 @@ export default function DiscoveryPage() {
 
   // Initial history load and auto-refresh
   useEffect(() => {
-    loadHistory(0)
-    const interval = setInterval(() => loadHistory(0), 10000)
+    loadHistory(0, false)
+    const interval = setInterval(() => loadHistory(0, true), 10000)
     return () => clearInterval(interval)
   }, [])  // Empty deps - only run once on mount
 
@@ -69,7 +84,8 @@ export default function DiscoveryPage() {
     const observer = new IntersectionObserver(
       entries => {
         if (entries[0].isIntersecting && hasMoreHistory && !historyLoading) {
-          loadHistory(historyOffset)
+          console.log('[IntersectionObserver] Loading more history, offset:', historyOffset)
+          loadHistory(historyOffset, false)
         }
       },
       { threshold: 0.1 }
@@ -85,17 +101,17 @@ export default function DiscoveryPage() {
         observer.unobserve(currentTarget)
       }
     }
-  }, [hasMoreHistory, historyLoading, historyOffset])  // Remove loadHistory
+  }, [hasMoreHistory, historyLoading, historyOffset])  // Remove loadHistory to prevent re-creating observer
 
   const loadQuota = async () => {
     try {
-      setLoading(true)
+      setQuotaLoading(true)
       const quotaData = await discoveryAPI.getQuota()
       setQuota(quotaData)
     } catch (err) {
       console.error('Failed to load quota:', err)
     } finally {
-      setLoading(false)
+      setQuotaLoading(false)
     }
   }
 
@@ -143,7 +159,7 @@ export default function DiscoveryPage() {
             loadQuota()
 
             // Reload history to show the new run
-            loadHistory(0)
+            loadHistory(0, false)
 
             // Close after a brief delay to ensure message is processed
             state.completionTimer = setTimeout(() => {
@@ -196,10 +212,6 @@ export default function DiscoveryPage() {
     }
   }
 
-  if (loading) {
-    return <div className="text-center py-12">Loading...</div>
-  }
-
   // Calculate efficiency metrics
   const efficiency = summary && summary.quota_used > 0
     ? (summary.videos_discovered / summary.quota_used).toFixed(2)
@@ -235,8 +247,8 @@ export default function DiscoveryPage() {
               max="10000"
               value={maxQuotaInput}
               onChange={(e) => setMaxQuotaInput(e.target.value)}
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={running}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={running || (user?.role === 'read' || user?.role === 'legal')}
               placeholder="Enter quota limit"
             />
             <p className="text-xs text-gray-500 mt-1">
@@ -249,26 +261,41 @@ export default function DiscoveryPage() {
             )}
           </div>
           <div className="flex flex-col gap-2">
-            <button
-              onClick={triggerDiscovery}
-              disabled={running}
-              className={`px-8 py-4 rounded-lg font-bold text-lg text-white transition-all active:scale-95 ${
-                running
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl'
-              }`}
-            >
-              {running ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Running...
-                </span>
-              ) : '▶ Start Discovery Run'}
-            </button>
-            {quota && (
+            {user && (user.role === 'read' || user.role === 'legal') ? (
+              <>
+                <button
+                  disabled
+                  className="px-8 py-4 rounded-lg font-bold text-lg text-white bg-gray-400 cursor-not-allowed opacity-60"
+                  title={`${user.role} role cannot trigger discovery runs`}
+                >
+                  ▶ Start Discovery Run
+                </button>
+                <p className="text-xs text-center text-gray-500">
+                  {user.role === 'legal' ? 'Legal' : 'Read-only'} access - Editor or Admin role required
+                </p>
+              </>
+            ) : (
+              <button
+                onClick={triggerDiscovery}
+                disabled={running}
+                className={`px-8 py-4 rounded-lg font-bold text-lg text-white transition-all active:scale-95 ${
+                  running
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl'
+                }`}
+              >
+                {running ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Running...
+                  </span>
+                ) : '▶ Start Discovery Run'}
+              </button>
+            )}
+            {quota && user && user.role !== 'read' && user.role !== 'legal' && (
               <p className="text-xs text-center text-gray-500">
                 {quota.remaining_quota.toLocaleString()} quota remaining
               </p>
@@ -356,9 +383,20 @@ export default function DiscoveryPage() {
       )}
 
       {/* YouTube API Quota */}
-      {quota && (
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-lg font-semibold mb-4">YouTube API Quota</h3>
+      <div className="bg-white rounded-lg shadow-md p-6">
+        <h3 className="text-lg font-semibold mb-4">YouTube API Quota</h3>
+        {quotaLoading ? (
+          <div className="animate-pulse space-y-4">
+            <div className="h-4 bg-gray-200 rounded w-full"></div>
+            <div className="h-4 bg-gray-200 rounded w-full"></div>
+            <div className="grid grid-cols-4 gap-4 pt-3">
+              <div className="h-20 bg-gray-100 rounded-lg"></div>
+              <div className="h-20 bg-gray-100 rounded-lg"></div>
+              <div className="h-20 bg-gray-100 rounded-lg"></div>
+              <div className="h-20 bg-gray-100 rounded-lg"></div>
+            </div>
+          </div>
+        ) : quota ? (
           <div className="space-y-4">
             <div>
               <div className="flex justify-between text-sm mb-2">
@@ -411,8 +449,10 @@ export default function DiscoveryPage() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-gray-500 text-center py-4">Failed to load quota information</p>
+        )}
+      </div>
 
       {/* Last Discovery Run Details */}
       {summary?.last_run && (
@@ -460,7 +500,7 @@ export default function DiscoveryPage() {
           <div>
             <h3 className="text-xl font-bold text-gray-900">Discovery History</h3>
             <p className="text-gray-600 text-sm">
-              {history.filter(r => r.status === 'running').length} running • {history.length} total operations
+              {history.filter(r => r.status === 'running').length} running
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500">

@@ -129,35 +129,46 @@ def get_discovery_engine(
 # ============================================================================
 
 
-@router.post("/run", response_model=DiscoveryStats)
+@router.post("/run")
 async def discover(
-    max_quota: int = 10_000,  # Full daily quota by default
+    max_quota: int | None = None,  # Auto-calculate if not provided
     engine: DiscoveryEngine = Depends(get_discovery_engine),
+    quota_manager: QuotaManager = Depends(get_quota_manager),
     firestore_client: firestore.Client = Depends(get_firestore_client),
-) -> DiscoveryStats:
+):
     """
-    Run smart query-based discovery.
+    Run smart query-based discovery with automatic quota optimization.
+
+    **NON-BLOCKING**: Returns immediately and runs discovery in background.
+    This prevents Cloud Scheduler timeouts and health probe kills.
 
     Strategy:
     - Deep pagination (5 pages per keyword)
     - Daily order rotation (date/viewCount/rating/relevance)
     - Daily time window rotation (last_7d/last_30d/30-90d_ago)
     - Smart deduplication (skip scanned, update unscanned for virality)
+    - AUTO QUOTA: If max_quota not specified, calculates optimal quota
+      to perfectly deplete remaining daily quota by midnight UTC
 
     Capacity:
     - 10k quota = ~100 queries = ~5,000 videos/day
 
     Args:
-        max_quota: Maximum quota limit for this run (default: 10,000 units)
+        max_quota: Maximum quota limit (optional - auto-calculated if not provided)
 
     Returns:
-        Discovery statistics
+        Immediate response with run_id (discovery runs in background)
     """
-    logger.info(f"Starting smart discovery with max_quota={max_quota}")
+    # Auto-calculate optimal quota if not specified
+    if max_quota is None:
+        max_quota = quota_manager.calculate_optimal_quota()
+        logger.info(f"Auto-calculated optimal quota: {max_quota} units")
+    else:
+        logger.info(f"Using specified max_quota: {max_quota} units")
 
     # Create discovery history entry
     import uuid
-    from datetime import datetime, timezone
+    import asyncio
 
     run_id = str(uuid.uuid4())
     history_entry = {
@@ -165,6 +176,7 @@ async def discover(
         "status": "running",
         "max_quota": max_quota,
         "started_at": firestore.SERVER_TIMESTAMP,
+        "quota_auto_calculated": max_quota is None or "auto" in str(max_quota).lower(),
     }
 
     try:
@@ -173,54 +185,116 @@ async def discover(
     except Exception as e:
         logger.warning(f"Failed to create discovery history: {e}")
 
-    try:
-        stats = await engine.discover(max_quota=max_quota)
+    # Run discovery in background (fire-and-forget)
+    async def run_discovery_background():
+        """Background task to run discovery without blocking the HTTP response."""
+        all_progress_events = []
 
-        # Update history with results
+        async def progress_callback(data):
+            all_progress_events.append(data)
+
         try:
-            firestore_client.collection("discovery_history").document(run_id).update({
-                "status": "completed",
-                "completed_at": firestore.SERVER_TIMESTAMP,
-                "videos_discovered": stats.videos_discovered,
-                "videos_with_ip_match": stats.videos_with_ip_match,
-                "videos_skipped_duplicate": stats.videos_skipped_duplicate,
-                "quota_used": stats.quota_used,
-                "channels_tracked": stats.channels_tracked,
-                "duration_seconds": stats.duration_seconds,
-            })
-            logger.info(f"Updated discovery history {run_id} to completed")
+            stats = await engine.discover(
+                max_quota=max_quota,
+                progress_callback=progress_callback
+            )
+
+            # Extract detailed query information from progress events
+            all_keywords = []
+            query_details = []
+
+            # Get keywords from plan event
+            for event in all_progress_events:
+                if event['type'] == 'plan':
+                    all_keywords = event['unique_keywords']
+                    break
+
+            # Collect actual query results with full details
+            for event in all_progress_events:
+                if event['type'] == 'query_result':
+                    # Get actual time window from event or default to ALL TIME
+                    time_window_display = 'ALL TIME'
+                    if event.get('time_window'):
+                        tw = event['time_window']
+                        start = tw['published_after'][:10] if 'published_after' in tw else '?'
+                        end = tw['published_before'][:10] if 'published_before' in tw else '?'
+                        time_window_display = f"{start} to {end}"
+
+                    query_details.append({
+                        'keyword': event['keyword'],
+                        'order': event['order'],
+                        'results_count': event.get('results_count', 0),
+                        'new_count': event.get('new_count', 0),
+                        'rediscovered_count': event.get('rediscovered_count', 0),
+                        'skipped_count': event.get('skipped_count', 0),
+                        'time_window': time_window_display
+                    })
+
+            # Update history with complete results and details
+            try:
+                firestore_client.collection("discovery_history").document(run_id).update({
+                    "status": "completed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "videos_discovered": stats.videos_discovered,
+                    "videos_with_ip_match": stats.videos_with_ip_match,
+                    "videos_skipped_duplicate": stats.videos_skipped_duplicate,
+                    "quota_used": stats.quota_used,
+                    "channels_tracked": stats.channels_tracked,
+                    "duration_seconds": stats.duration_seconds,
+                    # Store rich details for popup modal
+                    "keywords_searched": all_keywords,
+                    "keywords_count": len(all_keywords),
+                    "all_query_details": query_details,
+                    "time_window": 'ALL TIME',
+                    "orders_used": list(set(q['order'] for q in query_details)),
+                })
+                logger.info(f"Updated discovery history {run_id} to completed with full details")
+            except Exception as e:
+                logger.error(f"Failed to update discovery history: {e}")
+
         except Exception as e:
-            logger.error(f"Failed to update discovery history: {e}")
+            logger.error(f"Discovery failed: {e}")
 
-        return stats
+            # Mark as failed in history
+            try:
+                firestore_client.collection("discovery_history").document(run_id).update({
+                    "status": "failed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "error_message": str(e),
+                })
+            except:
+                pass
 
-    except Exception as e:
-        logger.error(f"Discovery failed: {e}")
+    # Start background task (fire-and-forget)
+    asyncio.create_task(run_discovery_background())
 
-        # Mark as failed in history
-        try:
-            firestore_client.collection("discovery_history").document(run_id).update({
-                "status": "failed",
-                "completed_at": firestore.SERVER_TIMESTAMP,
-                "error_message": str(e),
-            })
-        except:
-            pass
-
-        raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
+    # Return immediately
+    return {
+        "status": "started",
+        "run_id": run_id,
+        "max_quota": max_quota,
+        "message": f"Discovery job started in background with quota limit {max_quota}"
+    }
 
 
 @router.get("/run/stream")
 async def run_discovery_stream(
-    max_quota: int = 10_000,
+    max_quota: int | None = None,  # Auto-calculate if not provided
     engine: DiscoveryEngine = Depends(get_discovery_engine),
+    quota_manager: QuotaManager = Depends(get_quota_manager),
     firestore_client: firestore.Client = Depends(get_firestore_client),
 ):
     """
     Run discovery with real-time SSE progress updates.
 
     Streams progress events as discovery executes queries.
+    Auto-calculates optimal quota if not specified.
     """
+    # Auto-calculate optimal quota if not specified
+    if max_quota is None:
+        max_quota = quota_manager.calculate_optimal_quota()
+        logger.info(f"Auto-calculated optimal quota for stream: {max_quota} units")
+
     # Create discovery history entry
     import uuid
     from datetime import datetime, timezone
@@ -231,6 +305,7 @@ async def run_discovery_stream(
         "status": "running",
         "max_quota": max_quota,
         "started_at": firestore.SERVER_TIMESTAMP,
+        "quota_auto_calculated": max_quota is None or "auto" in str(max_quota).lower(),
     }
 
     try:

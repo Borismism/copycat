@@ -25,6 +25,7 @@ class ServiceStatus(str, Enum):
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     UNHEALTHY = "unhealthy"
+    STARTING = "starting"  # Cold start or warming up
     UNKNOWN = "unknown"
 
 
@@ -256,3 +257,68 @@ class SystemStatus(BaseModel):
     services: list[ServiceHealth]
     summary: SystemSummary
     timestamp: datetime
+
+
+# ============================================================================
+# User Role Models
+# ============================================================================
+
+
+class UserRole(str, Enum):
+    """User role for access control."""
+
+    ADMIN = "admin"  # Full access including user management
+    EDITOR = "editor"  # Start scans, edit configs, manage channels
+    LEGAL = "legal"  # Edit legal fields (action_status, notes, enforcement)
+    READ = "read"  # View-only access
+
+
+class RoleAssignment(BaseModel):
+    """User or domain role assignment."""
+
+    # Either email OR domain must be set (not both)
+    email: str | None = None  # Specific user email
+    domain: str | None = None  # Domain (e.g., "nextnovate.com")
+    role: UserRole
+    assigned_by: str  # Email of admin who assigned this role
+    assigned_at: datetime
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_email_or_domain(self) -> "RoleAssignment":
+        """Ensure exactly one of email or domain is set."""
+        if (self.email is None) == (self.domain is None):
+            raise ValueError("Exactly one of 'email' or 'domain' must be set")
+        return self
+
+
+class UserInfo(BaseModel):
+    """Current user information with computed role."""
+
+    email: str
+    name: str | None = None
+    role: UserRole
+    picture: str | None = None  # Profile picture URL from IAP
+
+
+class RoleListResponse(BaseModel):
+    """List of role assignments."""
+
+    assignments: list[RoleAssignment]
+    total: int
+
+
+class CreateRoleRequest(BaseModel):
+    """Request to create a role assignment."""
+
+    email: str | None = None
+    domain: str | None = None
+    role: UserRole
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_email_or_domain(self) -> "CreateRoleRequest":
+        """Ensure exactly one of email or domain is set."""
+        if (self.email is None) == (self.domain is None):
+            raise ValueError("Exactly one of 'email' or 'domain' must be set")
+        return self

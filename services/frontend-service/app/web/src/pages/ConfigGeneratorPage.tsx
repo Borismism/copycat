@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import EditableTagsSection from '../components/EditableTagsSection';
+import { useAuth } from '../contexts/AuthContext';
 
 interface IPConfig {
   id: string;
@@ -36,10 +37,14 @@ interface GeneratedConfig {
 }
 
 export const ConfigGeneratorPage: React.FC = () => {
+  const { user } = useAuth();
   const [view, setView] = useState<'list' | 'detail' | 'generate' | 'deleted'>('list');
   const [configs, setConfigs] = useState<IPConfig[]>([]);
   const [deletedConfigs, setDeletedConfigs] = useState<any[]>([]);
   const [selectedConfig, setSelectedConfig] = useState<IPConfig | null>(null);
+
+  // Check if user can edit (admin or editor only)
+  const canEdit = user?.role === 'admin' || user?.role === 'editor';
 
   // AI Generation form state
   const [ipName, setIpName] = useState('');
@@ -528,7 +533,13 @@ export const ConfigGeneratorPage: React.FC = () => {
               </button>
               <button
                 onClick={() => setView('generate')}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                disabled={!canEdit}
+                className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white ${
+                  canEdit
+                    ? 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'
+                    : 'bg-gray-400 cursor-not-allowed opacity-60'
+                }`}
+                title={!canEdit ? `${user?.role} role cannot create IP configurations` : ''}
               >
                 <svg className="-ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -664,7 +675,13 @@ export const ConfigGeneratorPage: React.FC = () => {
 
             <button
               onClick={handleDeleteConfig}
-              className="inline-flex items-center px-4 py-2 border border-red-300 text-sm font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+              disabled={!canEdit}
+              className={`inline-flex items-center px-4 py-2 border border-red-300 text-sm font-medium rounded-md ${
+                canEdit
+                  ? 'text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500'
+                  : 'text-gray-400 bg-gray-100 cursor-not-allowed opacity-60'
+              } transition-colors`}
+              title={!canEdit ? `${user?.role} role cannot delete configurations` : ''}
             >
               <svg className="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1057,8 +1074,9 @@ export const ConfigGeneratorPage: React.FC = () => {
           <div className="mt-6">
             <button
               onClick={handleGenerate}
-              disabled={loading}
+              disabled={loading || !canEdit}
               className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={!canEdit ? `${user?.role} role cannot generate IP configurations` : ''}
             >
               {loading ? (
                 <>
@@ -1134,8 +1152,9 @@ export const ConfigGeneratorPage: React.FC = () => {
                       setLoading(false);
                     }
                   }}
-                  disabled={loading}
+                  disabled={loading || !canEdit}
                   className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={!canEdit ? `${user?.role} role cannot save configurations` : ''}
                 >
                   {loading ? (
                     <>

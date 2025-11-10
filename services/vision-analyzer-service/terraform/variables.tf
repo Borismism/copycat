@@ -70,10 +70,10 @@ variable "concurrency" {
 }
 
 # Budget configuration
-variable "daily_budget_usd" {
-  description = "Daily Gemini API budget in USD"
+variable "daily_budget_eur" {
+  description = "Daily Gemini API budget in EUR"
   type        = string
-  default     = "260" # Production default: €240 ≈ $260
+  default     = "260" # Production default: €260
 }
 
 variable "state_bucket" {

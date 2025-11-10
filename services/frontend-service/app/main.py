@@ -72,7 +72,26 @@ async def proxy_to_api(path: str, request: Request) -> Response:
         "content-type": request.headers.get("content-type", "application/json"),
     }
 
-    # Add IAM authentication (skip only in local development with docker-compose)
+    # Forward IAP headers to API service (for user authentication)
+    iap_email = request.headers.get("X-Goog-Authenticated-User-Email")
+    iap_jwt = request.headers.get("X-Goog-IAP-JWT-Assertion")
+
+    if iap_email:
+        headers["X-Goog-Authenticated-User-Email"] = iap_email
+    if iap_jwt:
+        headers["X-Goog-IAP-JWT-Assertion"] = iap_jwt
+
+    # Forward "Act As" header for admin impersonation
+    act_as = request.headers.get("X-Act-As")
+    if act_as:
+        headers["X-Act-As"] = act_as
+
+    # For local dev without IAP, check for dev user header
+    dev_user = request.headers.get("X-Dev-User")
+    if dev_user and settings.environment == "local":
+        headers["X-Dev-User"] = dev_user
+
+    # Add IAM authentication for service-to-service auth (skip only in local development)
     if settings.environment != "local":
         try:
             # Fetch service account ID token for api-service audience

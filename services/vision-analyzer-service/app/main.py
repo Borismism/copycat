@@ -70,7 +70,7 @@ async def startup_event():
     logger.info(f"GCP Project: {settings.gcp_project_id}")
     logger.info(f"Region: {settings.gcp_region}")
     logger.info(f"Gemini Model: {settings.gemini_model}")
-    logger.info(f"Daily Budget: ${settings.daily_budget_usd}")
+    logger.info(f"Daily Budget: €{settings.daily_budget_eur}")
 
     # Initialize GCP clients
     logger.info("Initializing GCP clients...")

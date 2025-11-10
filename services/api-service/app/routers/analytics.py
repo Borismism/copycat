@@ -3,37 +3,78 @@
 import logging
 import traceback
 from datetime import datetime, timedelta
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from google.cloud import firestore
 
 from app.core.firestore_client import firestore_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Simple in-memory cache with TTL
+_cache: Dict[str, tuple[Any, datetime]] = {}
+_CACHE_TTL_SECONDS = 60  # 60 second cache for expensive queries
+
+
+def get_cached(key: str) -> Optional[Any]:
+    """Get value from cache if still valid."""
+    if key in _cache:
+        value, expires_at = _cache[key]
+        if datetime.now() < expires_at:
+            return value
+        else:
+            del _cache[key]
+    return None
+
+
+def set_cache(key: str, value: Any, ttl_seconds: int = _CACHE_TTL_SECONDS):
+    """Set value in cache with TTL."""
+    expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
+    _cache[key] = (value, expires_at)
+
 
 @router.get("/hourly-stats")
-async def get_hourly_stats(hours: int = 24):
+async def get_hourly_stats(hours: int = 24, start_date: Optional[str] = None):
     """
     Get hourly activity statistics for timeline chart.
 
     Args:
-        hours: Number of hours to look back (default: 24)
+        hours: Number of hours to fetch (default: 24)
+        start_date: Optional start date in ISO format (YYYY-MM-DD). If not provided, uses current time.
 
     Returns:
         List of hourly buckets with discoveries and infringements (in UTC)
     """
+    # Check cache first
+    cache_key = f"hourly_stats_{hours}_{start_date or 'now'}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         from datetime import timezone
+        from dateutil import parser as date_parser
 
         # Use UTC for consistency
-        now = datetime.now(timezone.utc)
-        start = now - timedelta(hours=hours)
+        if start_date:
+            # Parse the provided start date and set to beginning of day in UTC
+            start = date_parser.isoparse(start_date)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            else:
+                start = start.astimezone(timezone.utc)
+            # Set to start of day
+            start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        else:
+            # Use current day (midnight to now/midnight)
+            now = datetime.now(timezone.utc)
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # Initialize hourly buckets (UTC) - include current hour
+        # Initialize hourly buckets (UTC)
         hourly_data = {}
-        for i in range(hours + 1):  # +1 to include current hour
+        for i in range(hours):
             hour = start + timedelta(hours=i)
             hour_key = hour.replace(minute=0, second=0, microsecond=0).isoformat()
             hourly_data[hour_key] = {
@@ -43,60 +84,161 @@ async def get_hourly_stats(hours: int = 24):
                 "infringements": 0,
             }
 
-        # Query ALL videos and filter in memory
-        # Note: We need all videos because analyses/infringements may happen days after discovery
-        all_video_docs = firestore_client.videos_collection.stream()
+        # Query pre-aggregated hourly_stats collection (FAST!)
+        # This reads only ~24 small documents instead of thousands of videos
+        hourly_stats = (
+            firestore_client.db.collection("hourly_stats")
+            .where("hour", ">=", start)
+            .stream()
+        )
 
-        for video in all_video_docs:
-            data = video.to_dict()
+        for stat_doc in hourly_stats:
+            data = stat_doc.to_dict()
+            hour = data.get("hour")
 
-            # Use discovered_at, fall back to created_at
-            timestamp_raw = data.get("discovered_at") or data.get("created_at")
-            if not timestamp_raw:
-                continue
-
-            # Parse timestamp (could be string or datetime)
-            if isinstance(timestamp_raw, str):
-                # Parse ISO format string
+            # Parse hour timestamp
+            if isinstance(hour, str):
                 from dateutil import parser
-                timestamp = parser.isoparse(timestamp_raw)
+                hour_dt = parser.isoparse(hour)
             else:
-                timestamp = timestamp_raw
+                hour_dt = hour
 
-            # Ensure timezone-aware datetime
-            if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            # Ensure timezone-aware
+            if hour_dt.tzinfo is None:
+                hour_dt = hour_dt.replace(tzinfo=timezone.utc)
             else:
-                timestamp = timestamp.astimezone(timezone.utc)
+                hour_dt = hour_dt.astimezone(timezone.utc)
 
-            # Skip if outside our time range
-            if timestamp < start:
-                continue
+            hour_key = hour_dt.isoformat()
 
-            # Round to hour
-            hour = timestamp.replace(minute=0, second=0, microsecond=0)
-            hour_key = hour.isoformat()
-
+            # Update hourly data with pre-aggregated stats
             if hour_key in hourly_data:
-                hourly_data[hour_key]["discoveries"] += 1
+                hourly_data[hour_key]["discoveries"] = data.get("discoveries", 0)
+                hourly_data[hour_key]["analyses"] = data.get("analyses", 0)
+                hourly_data[hour_key]["infringements"] = data.get("infringements", 0)
 
-                # Count analyses
-                if data.get("status") == "analyzed":
-                    hourly_data[hour_key]["analyses"] += 1
-
-                    # Count infringements (new structure: analysis.contains_infringement)
-                    analysis = data.get("analysis", {})
-                    if isinstance(analysis, dict) and analysis.get("contains_infringement"):
-                        hourly_data[hour_key]["infringements"] += 1
-
-        return {
+        result = {
             "hours": sorted(hourly_data.values(), key=lambda x: x["timestamp"])
         }
+
+        # Cache the result
+        set_cache(cache_key, result)
+        return result
 
     except Exception as e:
         logger.error(f"Failed to get hourly stats: {str(e)}")
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to get hourly stats: {str(e)}")
+
+
+@router.get("/daily-stats")
+async def get_daily_stats(days: int = 30, start_date: Optional[str] = None):
+    """
+    Get daily activity statistics for monthly chart view.
+
+    Args:
+        days: Number of days to fetch (default: 30)
+        start_date: Optional start date in ISO format (YYYY-MM-DD). If not provided, uses current time.
+
+    Returns:
+        List of daily buckets with discoveries and infringements (in UTC)
+    """
+    # Check cache first
+    cache_key = f"daily_stats_{days}_{start_date or 'now'}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        from datetime import timezone
+        from dateutil import parser as date_parser
+
+        # Use UTC for consistency
+        if start_date:
+            # Parse the provided start date and set to beginning of month in UTC
+            start = date_parser.isoparse(start_date)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            else:
+                start = start.astimezone(timezone.utc)
+            # Set to start of month (day 1)
+            start = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+            # Calculate days in this specific month
+            if start.month == 12:
+                next_month = start.replace(year=start.year + 1, month=1)
+            else:
+                next_month = start.replace(month=start.month + 1)
+            days = (next_month - start).days
+        else:
+            # Current month: start from 1st of current month
+            now = datetime.now(timezone.utc)
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+            # Calculate days in current month
+            if start.month == 12:
+                next_month = start.replace(year=start.year + 1, month=1)
+            else:
+                next_month = start.replace(month=start.month + 1)
+            days = (next_month - start).days
+
+        # Initialize daily buckets
+        daily_data = {}
+        for i in range(days):
+            day = start + timedelta(days=i)
+            day_key = day.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            daily_data[day_key] = {
+                "timestamp": day_key,
+                "discoveries": 0,
+                "analyses": 0,
+                "infringements": 0,
+            }
+
+        # Query hourly_stats and aggregate by day
+        hourly_stats = (
+            firestore_client.db.collection("hourly_stats")
+            .where("hour", ">=", start)
+            .stream()
+        )
+
+        for stat_doc in hourly_stats:
+            data = stat_doc.to_dict()
+            hour = data.get("hour")
+
+            # Parse hour timestamp
+            if isinstance(hour, str):
+                hour_dt = date_parser.isoparse(hour)
+            else:
+                hour_dt = hour
+
+            # Ensure timezone-aware
+            if hour_dt.tzinfo is None:
+                hour_dt = hour_dt.replace(tzinfo=timezone.utc)
+            else:
+                hour_dt = hour_dt.astimezone(timezone.utc)
+
+            # Get day key (truncate to day)
+            day_dt = hour_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_key = day_dt.isoformat()
+
+            # Aggregate into daily buckets
+            if day_key in daily_data:
+                daily_data[day_key]["discoveries"] += data.get("discoveries", 0)
+                daily_data[day_key]["analyses"] += data.get("analyses", 0)
+                daily_data[day_key]["infringements"] += data.get("infringements", 0)
+
+        result = {
+            "days": sorted(daily_data.values(), key=lambda x: x["timestamp"])
+        }
+
+        # Cache the result
+        set_cache(cache_key, result)
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to get daily stats: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to get daily stats: {str(e)}")
 
 
 @router.get("/system-health")
@@ -220,6 +362,12 @@ async def get_performance_metrics():
     Returns:
         Discovery efficiency, analysis throughput, budget utilization, queue health
     """
+    # Check cache first
+    cache_key = "performance_metrics"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         summary = await firestore_client.get_24h_summary()
 
@@ -236,35 +384,50 @@ async def get_performance_metrics():
         # Note: Direct service-to-service calls don't work in Cloud Run (not Kubernetes)
         # Vision analyzer updates budget_tracking collection in Firestore
         try:
-            today = datetime.now().strftime("%Y-%m-%d")
+            from datetime import timezone as tz
+            today = datetime.now(tz.utc).strftime("%Y-%m-%d")
             budget_doc = firestore_client.db.collection("budget_tracking").document(today).get()
             if budget_doc.exists:
                 budget_data = budget_doc.to_dict()
-                total_spent = budget_data.get("total_spent_usd", 0)
-                daily_budget = 260.0
-                budget_utilization = total_spent / daily_budget
+                total_spent = budget_data.get("total_spent_eur", 0)
+                # Get daily budget from document (vision-analyzer stores this)
+                daily_budget = budget_data.get("daily_budget_eur", 260.0)
+                budget_utilization = total_spent / daily_budget if daily_budget > 0 else 0
+                logger.info(f"Budget data: spent=€{total_spent:.2f}, budget=€{daily_budget}, util={budget_utilization:.2%}")
             else:
+                logger.warning(f"No budget_tracking document found for {today}")
                 total_spent = 0
                 budget_utilization = 0
-        except Exception:
+                daily_budget = 260.0  # Fallback to configured default (EUR)
+        except Exception as e:
+            logger.error(f"Failed to get budget data: {e}", exc_info=True)
             total_spent = 0
             budget_utilization = 0
+            daily_budget = 260.0
 
-        # Queue health (pending videos) - manual count (more reliable)
+        # Queue health (pending videos) - use aggregation query for efficiency
         try:
-            pending_docs = firestore_client.videos_collection.where("status", "==", "discovered").stream()
-            pending_videos = sum(1 for _ in pending_docs)
+            from google.cloud.firestore_v1.aggregation import AggregationQuery, Count
+
+            # Use Firestore aggregation query (much faster than streaming)
+            query = firestore_client.videos_collection.where("status", "==", "discovered")
+            aggregation_query = AggregationQuery(query)
+            aggregation_query.count(alias="pending_count")
+
+            result = aggregation_query.get()
+            pending_videos = result[0][0].value if result else 0
         except Exception as count_error:
-            logger.warning(f"Failed to count pending videos: {count_error}")
-            pending_videos = 0
+            logger.warning(f"Failed to count pending videos: {count_error}, falling back to estimate")
+            # Fallback: use cached value from summary if available
+            pending_videos = summary.get("videos_pending", 0)
 
         # Calculate scores (0-100)
         discovery_score = min(100, (discovery_efficiency / 0.5) * 100) if discovery_efficiency > 0 else 0
-        throughput_score = min(100, (analysis_throughput / 25.0) * 100) if analysis_throughput > 0 else 0
+        throughput_score = min(100, (analysis_throughput / 250.0) * 100) if analysis_throughput > 0 else 0
         budget_score = budget_utilization * 100
         queue_score = 100 if pending_videos < 5000 else 50 if pending_videos < 10000 else 25
 
-        return {
+        result = {
             "discovery_efficiency": {
                 "value": round(discovery_efficiency, 2),
                 "target": 0.5,
@@ -273,14 +436,14 @@ async def get_performance_metrics():
             },
             "analysis_throughput": {
                 "value": round(analysis_throughput, 1),
-                "target": 25.0,
+                "target": 250.0,
                 "score": round(throughput_score, 1),
                 "status": "excellent" if throughput_score >= 90 else "good" if throughput_score >= 70 else "fair",
             },
             "budget_utilization": {
                 "value": round(budget_utilization, 3),
                 "spent": round(total_spent, 2),
-                "total": 240.0,
+                "total": daily_budget,
                 "score": round(budget_score, 1),
                 "status": "excellent" if 85 <= budget_score <= 95 else "good" if budget_score >= 75 else "low",
             },
@@ -291,6 +454,10 @@ async def get_performance_metrics():
                 "status": "excellent" if pending_videos < 5000 else "good" if pending_videos < 10000 else "warning",
             },
         }
+
+        # Cache the result
+        set_cache(cache_key, result)
+        return result
 
     except Exception as e:
         logger.error(f"Failed to get performance metrics: {str(e)}")

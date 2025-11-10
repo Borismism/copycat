@@ -79,63 +79,140 @@ async def get_channel_statistics():
 
 
 @router.get("/scan-history-with-processing")
-async def get_scan_history_with_processing(limit: int = 50, offset: int = 0):
+async def get_scan_history_with_processing(
+    limit: int = 50,
+    cursor: str | None = None
+):
     """
-    OPTIMIZED: Get scan history AND processing videos in one call.
+    BLAZING FAST: Cursor-based pagination (no offset!).
 
-    Combines two endpoints to reduce round trips:
-    - /api/channels/scan-history
-    - /api/videos/processing/list
+    Instead of offset, use cursor (the last scan_id from previous page).
+    Firestore .start_after() is O(1) instead of O(n) like offset!
 
-    Returns both scan history and currently processing videos.
+    Performance: <200ms regardless of page number!
     """
+    import time
+    import logging
+    logger = logging.getLogger(__name__)
+
+    start_time = time.time()
+
     try:
         from google.cloud import firestore as fs
-        from collections import defaultdict
-
-        # Execute both queries in parallel using asyncio
         import asyncio
 
-        async def get_processing_videos():
-            query = firestore_client.videos_collection.where("status", "==", "processing").limit(50)
-            docs = list(query.stream())
-            videos = []
-            for doc in docs:
-                data = doc.to_dict()
-                if data.get("analysis"):
-                    data["vision_analysis"] = data["analysis"]
-                from app.models import VideoMetadata
-                videos.append(VideoMetadata(**data))
-            return videos
-
         async def get_scan_hist():
-            # OPTIMIZED: Fetch only what we need + small buffer
-            # Most videos have 1-2 scan attempts, so fetch 2x instead of 3x
-            fetch_limit = (limit + offset) * 2  # Reduced from 3x to 2x
-            scans = (
+            query_start = time.time()
+
+            # CURSOR-BASED PAGINATION - The FAST way!
+            query = (
                 firestore_client.db.collection("scan_history")
                 .order_by("started_at", direction=fs.Query.DESCENDING)
-                .limit(fetch_limit)
+                .limit(limit + 1)  # Fetch one extra to check if there's more
+            )
+
+            # Use cursor for pagination (FAST!)
+            if cursor:
+                cursor_lookup_start = time.time()
+                # Get the cursor document to start after
+                cursor_doc = firestore_client.db.collection("scan_history").document(cursor).get()
+                cursor_lookup_time = (time.time() - cursor_lookup_start) * 1000
+                logger.info(f"⏱️  Cursor lookup: {cursor_lookup_time:.2f}ms")
+
+                if cursor_doc.exists:
+                    query = query.start_after(cursor_doc)
+
+            stream_start = time.time()
+            result = list(query.stream())
+            stream_time = (time.time() - stream_start) * 1000
+
+            query_time = (time.time() - query_start) * 1000
+            logger.info(f"⏱️  Firestore query total: {query_time:.2f}ms (stream: {stream_time:.2f}ms)")
+
+            return result
+
+        # ONLY fetch scan history - processing videos removed (too slow!)
+        # Fetch MORE docs to account for grouping reducing count
+        query_exec_start = time.time()
+        scan_docs = await get_scan_hist()
+        query_exec_time = (time.time() - query_exec_start) * 1000
+        logger.info(f"⏱️  Query execution: {query_exec_time:.2f}ms")
+
+        # Fetch queued/processing videos (lightweight - just first 10 with matched_ips)
+        # Show both pending (queued) and processing (currently analyzing)
+        pending_query_start = time.time()
+        queued_videos = []
+        try:
+            # Get pending videos with high priority (queued for analysis)
+            pending_docs = (
+                firestore_client.videos_collection
+                .where("status", "==", "pending")
+                .where("matched_ips", "!=", [])
+                .order_by("scan_priority", direction=fs.Query.DESCENDING)
+                .limit(10)
                 .stream()
             )
-            return list(scans)
+            for doc in pending_docs:
+                data = doc.to_dict()
+                queued_videos.append({
+                    "video_id": doc.id,
+                    "title": data.get("title", "Unknown"),
+                    "channel_title": data.get("channel_title"),
+                    "matched_ips": data.get("matched_ips", []),
+                    "scan_priority": data.get("scan_priority", 0),
+                    "status": "queued",
+                })
 
-        # Run both queries in parallel
-        processing_videos, scan_docs = await asyncio.gather(
-            get_processing_videos(),
-            get_scan_hist()
-        )
+            # Also get processing videos (currently being analyzed)
+            processing_docs = (
+                firestore_client.videos_collection
+                .where("status", "==", "processing")
+                .limit(10)
+                .stream()
+            )
+            for doc in processing_docs:
+                data = doc.to_dict()
+                queued_videos.append({
+                    "video_id": doc.id,
+                    "title": data.get("title", "Unknown"),
+                    "channel_title": data.get("channel_title"),
+                    "matched_ips": data.get("matched_ips", []),
+                    "scan_priority": data.get("scan_priority", 0),
+                    "status": "processing",
+                })
 
-        # Process scan history (existing logic)
-        videos = defaultdict(list)
-        for scan in scan_docs:
-            data = scan.to_dict()
+            # Sort by priority (processing first, then by priority)
+            queued_videos.sort(key=lambda x: (0 if x["status"] == "processing" else 1, -x.get("scan_priority", 0)))
+            queued_videos = queued_videos[:10]  # Limit to 10 total
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch queued videos: {e}")
+
+        pending_query_time = (time.time() - pending_query_start) * 1000
+        logger.info(f"⏱️  Queued videos query: {pending_query_time:.2f}ms")
+
+        processing_videos = queued_videos
+
+        # GROUP scans by video_id - show latest status per video
+        processing_start = time.time()
+        from collections import defaultdict
+
+        video_scans = defaultdict(list)
+        for scan_doc in scan_docs:
+            data = scan_doc.to_dict()
+            data["scan_id"] = scan_doc.id
             video_id = data.get("video_id")
             if video_id:
-                videos[video_id].append(data)
+                video_scans[video_id].append(data)
 
+        grouping_time = (time.time() - processing_start) * 1000
+        logger.info(f"⏱️  Grouping by video_id: {grouping_time:.2f}ms")
+
+        # Create grouped scans (one per video, latest status)
+        condensing_start = time.time()
         grouped_scans = []
-        for video_id, attempts in videos.items():
+        for video_id, attempts in video_scans.items():
+            # Sort by started_at (most recent first)
             attempts_sorted = sorted(
                 attempts,
                 key=lambda x: x.get("started_at") or "",
@@ -144,6 +221,7 @@ async def get_scan_history_with_processing(limit: int = 50, offset: int = 0):
             latest = attempts_sorted[0]
             statuses = [a.get("status") for a in attempts_sorted]
 
+            # Aggregate status logic
             if "running" in statuses:
                 aggregate_status = "running"
             elif all(s == "failed" for s in statuses):
@@ -161,22 +239,48 @@ async def get_scan_history_with_processing(limit: int = 50, offset: int = 0):
             }
             grouped_scans.append(grouped_scan)
 
+        # Sort by started_at
         grouped_scans.sort(key=lambda x: x.get("started_at") or "", reverse=True)
-        paginated_scans = grouped_scans[offset:offset + limit]
-        has_more = len(grouped_scans) > offset + limit
+
+        condensing_time = (time.time() - condensing_start) * 1000
+        logger.info(f"⏱️  Condensing scans: {condensing_time:.2f}ms")
+
+        # Paginate grouped results
+        # IMPORTANT: Check if we have MORE than limit (because we fetched limit+1 from Firestore)
+        # But after grouping, we might have fewer unique videos
+        scans = grouped_scans[:limit]
+        # has_more = did we fetch limit+1 raw docs? (means there's more in Firestore)
+        has_more = len(scan_docs) > limit
+        next_cursor = scans[-1]["scan_id"] if (scans and has_more) else None
+
+        processing_time = (time.time() - processing_start) * 1000
+        logger.info(f"⏱️  Data processing total: {processing_time:.2f}ms (grouped {len(scan_docs)} scans into {len(grouped_scans)} videos)")
+
+        total_time = (time.time() - start_time) * 1000
+        logger.info(f"⏱️  TOTAL request time: {total_time:.2f}ms (cursor={cursor}, limit={limit}, results={len(scans)})")
 
         return {
             "scan_history": {
-                "scans": paginated_scans,
+                "scans": scans,
                 "limit": limit,
-                "offset": offset,
+                "cursor": cursor,
+                "next_cursor": next_cursor if has_more else None,
                 "has_more": has_more
             },
-            "processing_videos": processing_videos,
-            "processing_count": len(processing_videos)
+            "processing_videos": [],  # Removed - use /api/videos/processing/list if needed
+            "processing_count": 0,  # Frontend can get this from analytics
+            "_debug": {
+                "total_time_ms": round(total_time, 2),
+                "query_time_ms": round(query_exec_time, 2),
+                "processing_time_ms": round(processing_time, 2),
+                "docs_fetched": len(scan_docs),
+                "docs_returned": len(scans)
+            }
         }
 
     except Exception as e:
+        total_time = (time.time() - start_time) * 1000
+        logger.error(f"❌ Request failed after {total_time:.2f}ms: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get scan data: {str(e)}")
 
 

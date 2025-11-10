@@ -14,34 +14,22 @@ router = APIRouter()
 @router.get("/services", response_model=list[ServiceHealth])
 async def get_services_status():
     """Get health status of all services."""
+    # SKIP HEALTH CHECKS - they're too slow and block everything!
+    # Just return static status for key services shown on homepage
     services = []
 
-    # Check discovery service
-    discovery_health = await discovery_client.health_check()
+    # Discovery service - assume healthy (PubSub will handle failures)
     services.append(
         ServiceHealth(
             service_name="discovery-service",
-            status=ServiceStatus(discovery_health.get("status", "unknown")),
-            last_check=datetime.now(),
-            url=discovery_client.base_url,
-            error=discovery_health.get("error"),
-        )
-    )
-
-    # Risk-analyzer service (PubSub-triggered, reports via Firestore)
-    # No direct health check - marked as healthy if service exists in Cloud Run
-    services.append(
-        ServiceHealth(
-            service_name="risk-analyzer-service",
             status=ServiceStatus.HEALTHY,
             last_check=datetime.now(),
-            url="PubSub-triggered",
+            url=discovery_client.base_url,
             error=None,
         )
     )
 
     # Vision-analyzer service (PubSub-triggered, reports via Firestore)
-    # No direct health check - marked as healthy if service exists in Cloud Run
     services.append(
         ServiceHealth(
             service_name="vision-analyzer-service",

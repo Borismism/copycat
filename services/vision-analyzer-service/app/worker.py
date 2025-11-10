@@ -357,6 +357,51 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
         except Exception as e:
             logger.error(f"Failed to update scan history: {e}", exc_info=True)
 
+    except ValueError as e:
+        # Check if it's a PERMISSION_DENIED error (video not accessible)
+        if "PERMISSION_DENIED" in str(e):
+            logger.warning(
+                f"Video {scan_message.video_id} not accessible (PERMISSION_DENIED), "
+                f"marking as skipped: {e}"
+            )
+
+            # Update scan history to skipped
+            if scan_id:
+                try:
+                    firestore_client = firestore.Client(project=settings.gcp_project_id)
+                    firestore_client.collection("scan_history").document(scan_id).update({
+                        "status": "skipped",
+                        "completed_at": firestore.SERVER_TIMESTAMP,
+                        "error_message": "Video not accessible (private/restricted)",
+                        "error_type": "PERMISSION_DENIED",
+                    })
+                    logger.info(f"Updated scan history {scan_id} to skipped")
+                except:
+                    pass
+
+            # Update video status to skipped (not failed)
+            try:
+                doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(
+                    scan_message.video_id
+                )
+                doc_ref.update({
+                    "status": "skipped",
+                    "error_message": "Video not accessible (private/restricted)",
+                    "error_type": "PERMISSION_DENIED",
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                })
+                logger.info(f"Updated video {scan_message.video_id} status to 'skipped' (not accessible)")
+            except Exception as update_error:
+                logger.error(f"Failed to update video status: {update_error}")
+
+            # Ack message - don't retry inaccessible videos
+            message.ack()
+            logger.info("Message acked after marking video as skipped (PERMISSION_DENIED)")
+            return
+
+        # Re-raise other ValueErrors
+        raise
+
     except Exception as e:
         logger.error(f"Failed to process message: {e}", exc_info=True)
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { channelsAPI } from '../api/channels'
 import type { ChannelProfile, ChannelStats, ChannelTier, ActionStatus } from '../types'
 import { useAuth } from '../contexts/AuthContext'
+import { usePermissions } from '../hooks/usePermissions'
 import ScanProgressNotification from '../components/ScanProgressNotification'
 
 type SortOption = {
@@ -21,6 +22,7 @@ const SORT_OPTIONS: SortOption[] = [
 
 export default function ChannelEnforcementPage() {
   const { user } = useAuth()
+  const { canStartScans, canEditChannelEnforcement } = usePermissions()
   const navigate = useNavigate()
   const [channels, setChannels] = useState<ChannelProfile[]>([])
   const [, setStats] = useState<ChannelStats | null>(null)
@@ -264,33 +266,6 @@ export default function ChannelEnforcementPage() {
         </button>
       </div>
 
-      {/* Pipeline Overview */}
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-lg p-6 border border-blue-200">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Enforcement Pipeline</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="bg-white rounded-lg p-4 shadow border-l-4 border-blue-500">
-            <p className="text-sm font-medium text-gray-600">New / Not Reviewed</p>
-            <p className="text-3xl font-bold text-blue-600">{pipelineStats.new}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 shadow border-l-4 border-yellow-500">
-            <p className="text-sm font-medium text-gray-600">In Review</p>
-            <p className="text-3xl font-bold text-yellow-600">{pipelineStats.in_review}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 shadow border-l-4 border-red-500">
-            <p className="text-sm font-medium text-gray-600">Legal Action</p>
-            <p className="text-3xl font-bold text-red-600">{pipelineStats.legal_action}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 shadow border-l-4 border-purple-500">
-            <p className="text-sm font-medium text-gray-600">Monitoring</p>
-            <p className="text-3xl font-bold text-purple-600">{pipelineStats.monitoring}</p>
-          </div>
-          <div className="bg-white rounded-lg p-4 shadow border-l-4 border-green-500">
-            <p className="text-sm font-medium text-gray-600">Resolved</p>
-            <p className="text-3xl font-bold text-green-600">{pipelineStats.resolved}</p>
-          </div>
-        </div>
-      </div>
-
       {/* Filters & Sort */}
       <div className="bg-white rounded-lg shadow p-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -490,9 +465,9 @@ export default function ChannelEnforcementPage() {
                       e.stopPropagation()
                       handleScanAllVideos(channel)
                     }}
-                    className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
-                    disabled={activeScans.has(channel.channel_id)}
-                    title="Queue all unscanned videos for Gemini vision analysis (skips already analyzed videos)"
+                    className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={activeScans.has(channel.channel_id) || !canStartScans}
+                    title={!canStartScans ? `${user?.role} role cannot start scans` : "Queue all unscanned videos for Gemini vision analysis (skips already analyzed videos)"}
                   >
                     📹 Scan All Videos
                   </button>
@@ -501,9 +476,9 @@ export default function ChannelEnforcementPage() {
                       e.stopPropagation()
                       handleDeepScan(channel)
                     }}
-                    className="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50"
-                    disabled={activeScans.has(channel.channel_id)}
-                    title={`Fetch the latest 50 videos from this YouTube channel${channel.video_count && channel.video_count >= 50 ? ' (channel has 50+ videos)' : ''}`}
+                    className="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={activeScans.has(channel.channel_id) || !canStartScans}
+                    title={!canStartScans ? `${user?.role} role cannot trigger discovery` : `Fetch the latest 50 videos from this YouTube channel${channel.video_count && channel.video_count >= 50 ? ' (channel has 50+ videos)' : ''}`}
                   >
                     🔍 Discover
                   </button>

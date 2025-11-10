@@ -28,15 +28,16 @@ class Settings(BaseSettings):
     gemini_temperature: float = 0.2  # Low temp for consistency
     gemini_max_output_tokens: int = 40000  # Allow detailed responses (max is 65536)
 
-    # Budget settings (in USD)
-    daily_budget_usd: float = 260.0  # €240 ≈ $260
+    # Budget settings (in EUR)
+    daily_budget_eur: float = 260.0  # €260 daily budget
     # NOTE: Gemini 2.5 Flash on Vertex AI uses Dynamic Shared Quota (DSQ)
     # No hard rate limits! Scales automatically based on availability
 
-    # Token costs (per 1M tokens) - Vertex AI Gemini 2.5 Flash pricing
-    gemini_input_cost_per_1m: float = 0.30  # $0.30 per 1M input tokens
-    gemini_output_cost_per_1m: float = 2.50  # $2.50 per 1M output tokens
-    gemini_audio_cost_per_1m: float = 1.00  # $1.00 per 1M audio tokens
+    # Token costs (per 1M tokens) - Vertex AI Gemini 2.5 Flash pricing (converted to EUR)
+    # USD prices: $0.30 input, $2.50 output, $1.00 audio (converted at ~1.08)
+    gemini_input_cost_per_1m: float = 0.28  # €0.28 per 1M input tokens
+    gemini_output_cost_per_1m: float = 2.31  # €2.31 per 1M output tokens
+    gemini_audio_cost_per_1m: float = 0.93  # €0.93 per 1M audio tokens
 
     # Video processing costs (tokens per second at low resolution)
     # At 1 FPS: 66 tokens/frame + 32 tokens/second audio = 98 tokens/second

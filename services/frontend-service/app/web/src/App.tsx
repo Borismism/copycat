@@ -6,6 +6,7 @@ import DashboardsPage from './pages/DashboardsPage'
 import VideoListPage from './pages/VideoListPage'
 import ChannelEnforcementPage from './pages/ChannelEnforcementPage'
 import { ConfigGeneratorPage } from './pages/ConfigGeneratorPage'
+import UserRolesPage from './pages/UserRolesPage'
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route path="/videos" element={<VideoListPage />} />
           <Route path="/channels" element={<ChannelEnforcementPage />} />
           <Route path="/config" element={<ConfigGeneratorPage />} />
+          <Route path="/admin/roles" element={<UserRolesPage />} />
         </Routes>
       </Layout>
     </AuthProvider>

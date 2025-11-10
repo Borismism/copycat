@@ -357,6 +357,54 @@ class QuotaManager:
             "date": self._get_today_key(),
         }
 
+    def calculate_optimal_quota(self) -> int:
+        """
+        Calculate optimal quota to use right now to perfectly deplete daily quota.
+
+        Strategy:
+        - If max_quota not specified, intelligently distribute remaining quota
+        - Calculate hours remaining until UTC midnight (quota reset)
+        - Distribute remaining quota evenly across remaining hours
+        - Ensures we use all quota by end of day without running out early
+
+        Returns:
+            Optimal quota units to use for this discovery run
+
+        Example:
+            Current time: 14:00 UTC (2 PM)
+            Daily quota: 10,000 units
+            Used so far: 3,000 units
+            Remaining: 7,000 units
+            Hours until midnight: 10 hours
+            Optimal quota per run: 7,000 / 10 = 700 units
+        """
+        remaining_quota = self.get_remaining()
+
+        if remaining_quota <= 0:
+            logger.warning("No quota remaining for today")
+            return 0
+
+        # Calculate hours until UTC midnight (quota reset)
+        now = datetime.now(timezone.utc)
+        midnight_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        time_until_reset = midnight_today - now
+        hours_remaining = max(1, time_until_reset.total_seconds() / 3600)  # At least 1 hour
+
+        # Distribute remaining quota evenly across remaining hours
+        # This ensures we use all quota by end of day
+        optimal_quota = int(remaining_quota / hours_remaining)
+
+        # Ensure we use at least some quota (minimum 100 units)
+        # and don't exceed remaining quota
+        optimal_quota = max(100, min(optimal_quota, remaining_quota))
+
+        logger.info(
+            f"Calculated optimal quota: {optimal_quota} units "
+            f"(remaining: {remaining_quota}, hours left: {hours_remaining:.1f})"
+        )
+
+        return optimal_quota
+
     def reset_daily_quota(self) -> None:
         """
         Reset daily quota counter.

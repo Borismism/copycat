@@ -82,6 +82,7 @@ class DiscoveryEngine:
             Discovery statistics
         """
         start_time = datetime.now(timezone.utc)
+        today = start_time.strftime("%Y-%m-%d")
         logger.info(f"=== SMART DISCOVERY (quota={max_quota}) ===")
 
         # Get today's search plan
@@ -120,6 +121,7 @@ class DiscoveryEngine:
         videos_rediscovered = 0
         videos_skipped = 0
         quota_used = 0
+        unique_channel_ids = set()  # Track unique channels
 
         # Track keyword+order combinations (NOT just keywords!)
         # Each keyword gets 4 orderings, so we track "keyword|order" as the key
@@ -255,13 +257,14 @@ class DiscoveryEngine:
                     logger.info(f"   → Enriched with video details ({details_batches} batch calls)")
 
                 # Process results FIRST to get accurate counts
-                new_count, rediscovered_count, skipped_count = self._process_results(
+                new_count, rediscovered_count, skipped_count, batch_channels = self._process_results(
                     results
                 )
 
                 videos_discovered += new_count
                 videos_rediscovered += rediscovered_count
                 videos_skipped += skipped_count
+                unique_channel_ids.update(batch_channels)
 
                 # Send query results to callback with detailed breakdown
                 if progress_callback:
@@ -347,6 +350,9 @@ class DiscoveryEngine:
                     keyword_stats[keyword]["skipped"]
                 )
 
+        # Calculate unique channels from discovered videos
+        unique_channels = len(unique_channel_ids)
+
         # Calculate stats
         duration = (datetime.now(timezone.utc) - start_time).total_seconds()
         efficiency = videos_discovered / quota_used if quota_used > 0 else 0
@@ -356,7 +362,7 @@ class DiscoveryEngine:
             videos_with_ip_match=videos_discovered,  # All are keyword-matched
             videos_skipped_duplicate=videos_skipped,
             quota_used=quota_used,
-            channels_tracked=0,  # No longer tracking channels
+            channels_tracked=unique_channels,  # Count unique channels from discovered videos
             duration_seconds=duration,
             timestamp=datetime.now(timezone.utc),
         )
@@ -366,6 +372,7 @@ class DiscoveryEngine:
             f"Queries executed: {len(queries_processed)}\n"
             f"Keywords searched: {len(keyword_stats)}\n"
             f"New videos: {videos_discovered}\n"
+            f"Unique channels: {unique_channels}\n"
             f"Rediscovered (virality tracking): {videos_rediscovered}\n"
             f"Skipped (already scanned): {videos_skipped}\n"
             f"Quota used: {quota_used}/{max_quota} ({quota_used/max_quota*100:.1f}%)\n"
@@ -374,9 +381,17 @@ class DiscoveryEngine:
         )
 
         self._save_metrics(stats)
+
+        # Trigger batch vision analysis for top 500 unscanned videos
+        try:
+            await self._trigger_batch_vision_analysis(limit=500)
+        except Exception as e:
+            logger.error(f"Failed to trigger batch vision analysis: {e}")
+            # Don't fail discovery if vision trigger fails
+
         return stats
 
-    def _process_results(self, results: list[dict]) -> tuple[int, int, int]:
+    def _process_results(self, results: list[dict]) -> tuple[int, int, int, set]:
         """
         Process search results with smart deduplication.
 
@@ -389,11 +404,12 @@ class DiscoveryEngine:
             results: Raw YouTube API results
 
         Returns:
-            (new_count, rediscovered_count, skipped_count)
+            (new_count, rediscovered_count, skipped_count, channel_ids)
         """
         new_count = 0
         rediscovered_count = 0
         skipped_count = 0
+        channel_ids = set()
 
         logger.info(f"🎬 Processing {len(results)} videos...")
 
@@ -401,6 +417,10 @@ class DiscoveryEngine:
             try:
                 # Extract metadata
                 metadata = self.processor.extract_metadata(video_data)
+
+                # Track channel ID
+                if metadata.channel_id:
+                    channel_ids.add(metadata.channel_id)
 
                 # Check if exists
                 doc_ref = self.processor.firestore.collection("videos").document(
@@ -543,7 +563,7 @@ class DiscoveryEngine:
                 logger.error(f"Error processing video: {e}", exc_info=True)
                 continue
 
-        return new_count, rediscovered_count, skipped_count
+        return new_count, rediscovered_count, skipped_count, channel_ids
 
     def _save_metrics(self, stats: DiscoveryStats):
         """Save discovery metrics to Firestore."""
@@ -708,6 +728,88 @@ class DiscoveryEngine:
             logger.info(f"💎 {tier} keyword: '{keyword}' ({efficiency:.1f}% efficiency, cooldown={cooldown_days}d)")
         except Exception as e:
             logger.error(f"Failed to save keyword search: {e}")
+
+    async def _trigger_batch_vision_analysis(self, limit: int = 500):
+        """
+        Trigger vision analysis for top N unscanned videos by priority.
+
+        Queries Firestore for videos with status="discovered" (not yet analyzed),
+        orders by scan_priority descending, and publishes them to scan-ready topic.
+
+        Args:
+            limit: Maximum number of videos to trigger (default: 500)
+        """
+        import json
+        from google.cloud import firestore
+
+        logger.info(f"🔍 Querying top {limit} unscanned videos for batch vision analysis...")
+
+        try:
+            # Query videos with status="discovered" ordered by scan_priority
+            videos_ref = self.processor.firestore.collection("videos")
+            query = (
+                videos_ref
+                .where("status", "==", "discovered")
+                .order_by("scan_priority", direction=firestore.Query.DESCENDING)
+                .limit(limit)
+            )
+
+            videos = list(query.stream())
+
+            if not videos:
+                logger.info("No unscanned videos found to trigger")
+                return
+
+            logger.info(f"Found {len(videos)} unscanned videos, publishing to scan-ready topic...")
+
+            # Get scan-ready topic path
+            scan_ready_topic = "scan-ready"
+            topic_path = self.processor.publisher.topic_path(
+                self.processor.firestore.project,
+                scan_ready_topic
+            )
+
+            published_count = 0
+            for doc in videos:
+                video_data = doc.to_dict()
+                video_id = video_data.get("video_id")
+
+                # Build scan message
+                scan_message = {
+                    "video_id": video_id,
+                    "priority": video_data.get("scan_priority", 50),
+                    "metadata": {
+                        "video_id": video_id,
+                        "youtube_url": f"https://youtube.com/watch?v={video_id}",
+                        "title": video_data.get("title", ""),
+                        "duration_seconds": video_data.get("duration_seconds", 300),
+                        "view_count": video_data.get("view_count", 0),
+                        "channel_id": video_data.get("channel_id", ""),
+                        "channel_title": video_data.get("channel_title", ""),
+                        "risk_score": video_data.get("risk_score", 50.0),
+                        "risk_tier": video_data.get("risk_tier", "MEDIUM"),
+                        "matched_ips": video_data.get("matched_ips", []),
+                        "discovered_at": video_data.get("discovered_at").isoformat() if video_data.get("discovered_at") else datetime.now(timezone.utc).isoformat(),
+                        "last_risk_update": video_data.get("discovered_at").isoformat() if video_data.get("discovered_at") else datetime.now(timezone.utc).isoformat(),
+                        "scan_priority": video_data.get("scan_priority", 50),
+                    }
+                }
+
+                # Publish to scan-ready topic
+                message_data = json.dumps(scan_message).encode("utf-8")
+                future = self.processor.publisher.publish(topic_path, message_data)
+                future.result()  # Wait for publish to complete
+
+                published_count += 1
+
+                if published_count % 100 == 0:
+                    logger.info(f"Published {published_count}/{len(videos)} videos...")
+
+            logger.info(f"✅ Batch vision trigger complete: published {published_count} videos to scan-ready topic")
+
+        except Exception as e:
+            logger.error(f"Failed to trigger batch vision analysis: {e}", exc_info=True)
+            raise
 
     def _save_channel_scan(self, channel_id: str):
         """Save channel scan to Firestore to track when it was last scanned."""

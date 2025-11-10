@@ -7,6 +7,13 @@ export interface HourlyStats {
   infringements: number
 }
 
+export interface DailyStats {
+  timestamp: string
+  discoveries: number
+  analyses: number
+  infringements: number
+}
+
 export interface Alert {
   id: string
   type: 'critical' | 'warning' | 'info'
@@ -68,8 +75,20 @@ export interface RecentEvents {
 }
 
 export const analyticsAPI = {
-  async getHourlyStats(hours: number = 24): Promise<{ hours: HourlyStats[] }> {
-    return api.get(`/analytics/hourly-stats?hours=${hours}`)
+  async getHourlyStats(hours: number = 24, startDate?: string): Promise<{ hours: HourlyStats[] }> {
+    const params = new URLSearchParams({ hours: hours.toString() })
+    if (startDate) {
+      params.append('start_date', startDate)
+    }
+    return api.get(`/analytics/hourly-stats?${params}`)
+  },
+
+  async getDailyStats(days: number = 30, startDate?: string): Promise<{ days: DailyStats[] }> {
+    const params = new URLSearchParams({ days: days.toString() })
+    if (startDate) {
+      params.append('start_date', startDate)
+    }
+    return api.get(`/analytics/daily-stats?${params}`)
   },
 
   async getSystemHealth(): Promise<SystemHealth> {

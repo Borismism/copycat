@@ -80,8 +80,29 @@ class ChannelTracker:
 
                 doc_ref.set(channel_data)
                 logger.info(f"📺 Created channel: {channel_id} ({channel_title}) with 1 video")
+
+                # Increment global channel count
+                self._increment_global_stat("total_channels", 1)
+
                 return channel_data
 
         except Exception as e:
             logger.error(f"Failed to create/update channel {channel_id}: {e}")
             raise
+
+    def _increment_global_stat(self, stat_name: str, increment: int = 1):
+        """
+        Atomically increment global statistics counter.
+
+        Args:
+            stat_name: Name of the stat to increment
+            increment: Amount to increment by
+        """
+        try:
+            stats_ref = self.firestore.collection("system_stats").document("global")
+            stats_ref.set({
+                stat_name: firestore.Increment(increment),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+        except Exception as e:
+            logger.warning(f"Failed to increment global stat {stat_name}: {e}")

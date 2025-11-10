@@ -7,12 +7,9 @@ interface SystemHealthBannerProps {
 }
 
 const getServiceLink = (serviceName: string): string => {
-  if (serviceName.includes('discovery')) return '/discovery'
-  if (serviceName.includes('risk')) return '/risk'
-  if (serviceName.includes('vision')) return '/vision'
-  if (serviceName.includes('channel')) return '/channels'
-  if (serviceName.includes('video')) return '/videos'
-  return '/'
+  if (serviceName.includes('discovery')) return '/dashboards/discovery'
+  if (serviceName.includes('vision')) return '/dashboards/vision'
+  return '/dashboards'
 }
 
 const getStatusIcon = (status: ServiceStatus) => {
@@ -69,26 +66,44 @@ export default function SystemHealthBanner({ services, lastUpdated }: SystemHeal
         </span>
       </div>
 
-      {/* Service cards - centered and clean */}
-      <div className="flex flex-wrap justify-center gap-3">
+      {/* Service cards - larger and more prominent */}
+      <div className="flex flex-wrap justify-center gap-6">
         {services.map((service) => {
           const link = getServiceLink(service.service_name)
-          const serviceName = service.service_name.replace('-service', '')
+          const serviceName = service.service_name.replace('-service', '').replace('-', ' ')
+
+          // Get service icon
+          const serviceIcon = serviceName.includes('discovery') ? '🔍' : '🤖'
 
           return (
             <Link
               key={service.service_name}
               to={link}
-              className="group relative bg-white rounded-lg px-4 py-3 flex flex-col items-center min-w-[140px] hover:shadow-lg hover:scale-105 transition-all border border-gray-200"
+              className="group relative bg-white rounded-xl px-8 py-6 flex flex-col items-center min-w-[200px] hover:shadow-xl hover:scale-105 transition-all border-2 border-gray-200 hover:border-blue-400"
             >
-              <span className={`text-xl mb-1 ${getStatusColor(service.status)}`}>
-                {getStatusIcon(service.status)}
-              </span>
-              <p className="text-sm font-medium text-gray-700 capitalize">
+              {/* Service icon */}
+              <div className="text-4xl mb-3">
+                {serviceIcon}
+              </div>
+
+              {/* Service name */}
+              <p className="text-lg font-semibold text-gray-900 capitalize mb-2">
                 {serviceName}
               </p>
-              <p className={`text-xs mt-0.5 capitalize ${getStatusColor(service.status)}`}>
-                {service.status}
+
+              {/* Status indicator */}
+              <div className="flex items-center gap-2">
+                <span className={`text-lg ${getStatusColor(service.status)}`}>
+                  {getStatusIcon(service.status)}
+                </span>
+                <p className={`text-sm font-medium capitalize ${getStatusColor(service.status)}`}>
+                  {service.status}
+                </p>
+              </div>
+
+              {/* View details hint */}
+              <p className="text-xs text-gray-400 mt-3 group-hover:text-blue-600 transition-colors">
+                View details →
               </p>
             </Link>
           )
@@ -96,7 +111,7 @@ export default function SystemHealthBanner({ services, lastUpdated }: SystemHeal
       </div>
 
       {overall.status !== 'healthy' && (
-        <div className="mt-4 p-3 bg-white bg-opacity-50 rounded">
+        <div className="mt-6 p-4 bg-white bg-opacity-50 rounded-lg">
           <p className="text-sm font-medium">
             {services.filter(s => s.status !== 'healthy').map(s => (
               <span key={s.service_name} className="block">

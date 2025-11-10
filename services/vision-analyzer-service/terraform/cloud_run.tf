@@ -86,8 +86,8 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
 
       # Budget Configuration
       env {
-        name  = "DAILY_BUDGET_USD"
-        value = var.daily_budget_usd
+        name  = "DAILY_BUDGET_EUR"
+        value = var.daily_budget_eur
       }
 
       # IP Config Configuration (Story 006)
@@ -123,28 +123,8 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
         value = local.app_source_hash
       }
 
-      # Health check probes
-      startup_probe {
-        http_get {
-          path = "/health"
-          port = 8080
-        }
-        initial_delay_seconds = 10
-        timeout_seconds       = 5
-        period_seconds        = 15
-        failure_threshold     = 3
-      }
-
-      liveness_probe {
-        http_get {
-          path = "/health"
-          port = 8080
-        }
-        initial_delay_seconds = 30
-        timeout_seconds       = 5
-        period_seconds        = 60
-        failure_threshold     = 3
-      }
+      # Health check probes removed - long-running Gemini video analysis jobs can't respond to probes
+      # and get killed prematurely. Cloud Run will monitor port availability instead.
     }
 
     max_instance_request_concurrency = var.concurrency

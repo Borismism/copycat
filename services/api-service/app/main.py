@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.routers import analytics, channels, config, config_manager, config_ai_assistant, config_validate_characters, discovery, status, videos, vision_budget, keyword_stats
+from app.routers import analytics, channels, config, config_manager, config_ai_assistant, config_validate_characters, discovery, status, users, videos, vision_budget, keyword_stats
 
 # Configure logging
 logging.basicConfig(
@@ -37,13 +37,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all requests and responses."""
+    logger.info(f"🔵 {request.method} {request.url.path}")
+    try:
+        response = await call_next(request)
+        logger.info(f"✅ {request.method} {request.url.path} → {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"❌ {request.method} {request.url.path} → ERROR: {str(e)}", exc_info=True)
+        raise
+
 # Global exception handler for 500 errors
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Log all unhandled exceptions with full stack trace."""
+    tb = traceback.format_exc()
     logger.error(
-        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
-        exc_info=True  # This includes the full stack trace
+        f"🔴 UNHANDLED EXCEPTION on {request.method} {request.url.path}:\n"
+        f"Error: {exc}\n"
+        f"Traceback:\n{tb}"
     )
     return JSONResponse(
         status_code=500,
@@ -71,6 +86,7 @@ app.include_router(config_manager.router, prefix="/api/config", tags=["Configura
 app.include_router(config_ai_assistant.router, prefix="/api/config/ai", tags=["AI Configuration Assistant"])
 app.include_router(config_validate_characters.router, tags=["AI Configuration Assistant"])
 app.include_router(keyword_stats.router, prefix="/api/keywords", tags=["Keyword Statistics"])
+app.include_router(users.router, prefix="/api/users", tags=["Users & Roles"])
 
 
 @app.get("/")

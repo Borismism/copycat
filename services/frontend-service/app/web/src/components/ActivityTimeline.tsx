@@ -1,20 +1,23 @@
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { format, parseISO } from 'date-fns'
-import type { HourlyStats } from '../api/analytics'
+import type { HourlyStats, DailyStats } from '../api/analytics'
 
 interface ActivityTimelineProps {
-  data: HourlyStats[]
+  data: HourlyStats[] | DailyStats[]
+  viewMode: 'hourly' | 'daily'
 }
 
-export default function ActivityTimeline({ data }: ActivityTimelineProps) {
+export default function ActivityTimeline({ data, viewMode }: ActivityTimelineProps) {
   // Format data for display (convert UTC to local time)
   const chartData = data.map(item => {
     // Parse the ISO timestamp and convert to local time
     const utcDate = parseISO(item.timestamp)
-    const localTime = format(utcDate, 'HH:mm')
+    const displayTime = viewMode === 'hourly'
+      ? format(utcDate, 'HH:mm')
+      : format(utcDate, 'MMM d')
 
     return {
-      time: localTime,
+      time: displayTime,
       discoveries: item.discoveries,
       infringements: item.infringements,
     }
@@ -25,16 +28,11 @@ export default function ActivityTimeline({ data }: ActivityTimelineProps) {
   const totalInfringements = data.reduce((sum, item) => sum + item.infringements, 0)
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">
-            Activity Timeline (Last 24 Hours)
-          </h3>
-          <p className="text-sm text-gray-600">
-            Total: {totalDiscoveries.toLocaleString()} videos discovered, {totalInfringements.toLocaleString()} infringements
-          </p>
-        </div>
+    <div>
+      <div className="mb-4">
+        <p className="text-sm text-gray-600">
+          Total: {totalDiscoveries.toLocaleString()} videos discovered, {totalInfringements.toLocaleString()} infringements
+        </p>
       </div>
 
       <ResponsiveContainer width="100%" height={300}>

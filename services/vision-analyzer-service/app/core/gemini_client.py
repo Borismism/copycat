@@ -202,6 +202,33 @@ class GeminiClient:
                         await asyncio.sleep(2)  # Short delay before retry
                         continue
 
+                    # Also try to validate with Pydantic to catch schema issues early
+                    try:
+                        # Fix None values before validation
+                        if "ip_results" in response_data:
+                            for ip_result in response_data["ip_results"]:
+                                if ip_result.get("fair_use_applies") is None:
+                                    ip_result["fair_use_applies"] = False
+                                if ip_result.get("is_ai_generated") is None:
+                                    ip_result["is_ai_generated"] = False
+
+                        # Try to create the model - if this fails, retry
+                        from app.models import GeminiAnalysisResult
+                        GeminiAnalysisResult(**response_data)
+
+                    except Exception as validation_error:
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                f"Gemini response failed validation: {validation_error}, "
+                                f"retrying (attempt {attempt + 1}/{max_retries})"
+                            )
+                            logger.debug(f"Invalid response data: {json.dumps(response_data, indent=2)}")
+                            await asyncio.sleep(2)  # Short delay before retry
+                            continue
+                        else:
+                            # Last attempt - let it fail in _parse_response with full error details
+                            pass
+
                 except (json.JSONDecodeError, KeyError):
                     # If we can't validate, let the _parse_response handle it
                     pass
@@ -220,7 +247,19 @@ class GeminiClient:
                     logger.error(f"Rate limit exceeded after {max_retries} retries")
                     raise
 
+            except google_exceptions.PermissionDenied as e:
+                # Video is not accessible (private, restricted, or requires ownership)
+                logger.warning(f"Video not accessible (PERMISSION_DENIED): {youtube_url} - {e}")
+                # Raise a specific exception that the caller can catch and skip
+                raise ValueError(f"PERMISSION_DENIED: Video not accessible - {e}") from e
+
             except Exception as e:
+                # Check if error message contains PERMISSION_DENIED (in case it's wrapped)
+                error_str = str(e)
+                if "PERMISSION_DENIED" in error_str or "not owned by the user" in error_str:
+                    logger.warning(f"Video not accessible (permission error): {youtube_url} - {e}")
+                    raise ValueError(f"PERMISSION_DENIED: Video not accessible - {e}") from e
+
                 logger.error(f"Gemini API call failed: {e}")
                 raise
 
@@ -271,6 +310,7 @@ class GeminiClient:
 
         except Exception as e:
             logger.error(f"Failed to parse response: {e}")
+            logger.error(f"Response data that failed validation: {json.dumps(response_data, indent=2)}")
             raise
 
     def _calculate_metrics(

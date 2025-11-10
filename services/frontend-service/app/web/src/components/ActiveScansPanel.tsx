@@ -94,7 +94,9 @@ export default function ActiveScansPanel({
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex justify-between items-center flex-shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-white">Active Scans</h2>
-                <p className="text-blue-100 text-sm">{totalScans} total operations</p>
+                <p className="text-blue-100 text-sm">
+                  {runningScans.length} running • {completedScans.length} completed
+                </p>
               </div>
               <button
                 onClick={() => setIsOpen(false)}
