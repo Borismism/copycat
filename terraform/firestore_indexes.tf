@@ -128,3 +128,4 @@ resource "google_firestore_index" "videos_status_updated_at" {
 
 # Note: Single-field index for discovered_at is automatically created by Firestore
 # No composite index needed for: .where("discovered_at", ">=", start).order_by("discovered_at")
+# Correct firestore index imported
