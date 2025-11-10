@@ -1,5 +1,6 @@
 # Identity-Aware Proxy (IAP) Configuration
 # Provides authentication and authorization for frontend service
+# OAuth credentials stored in Secret Manager
 
 # Enable IAP API
 resource "google_project_service" "iap" {
