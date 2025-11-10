@@ -2,7 +2,7 @@
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, UTC, timedelta
 from typing import Any
 
 from google.cloud import firestore, pubsub_v1
@@ -11,6 +11,11 @@ from ..config import settings
 from ..models import VideoMetadata, VideoStatus
 
 logger = logging.getLogger(__name__)
+
+# Cache for IP configs (refresh every 5 minutes)
+_ip_configs_cache: list[dict[str, Any]] | None = None
+_ip_configs_cache_time: datetime | None = None
+_IP_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 
 class VideoProcessor:
@@ -62,7 +67,7 @@ class VideoProcessor:
         """
         try:
             if timestamp is None:
-                timestamp = datetime.now(timezone.utc)
+                timestamp = datetime.now(UTC)
 
             # Round to hour
             hour = timestamp.replace(minute=0, second=0, microsecond=0)
@@ -97,7 +102,7 @@ class VideoProcessor:
                 "channel_title": metadata.channel_title,
                 "total_videos_found": firestore.Increment(1),
                 "total_views": firestore.Increment(metadata.view_count or 0),
-                "last_seen_at": datetime.now(timezone.utc),
+                "last_seen_at": datetime.now(UTC),
                 "updated_at": firestore.SERVER_TIMESTAMP,
             }, merge=True)
 
@@ -168,7 +173,7 @@ class VideoProcessor:
             logger.warning(
                 f"Invalid publishedAt for video {video_id}: {published_at_str}"
             )
-            published_at = datetime.now(timezone.utc)
+            published_at = datetime.now(UTC)
 
         # Parse ISO 8601 duration (PT1H2M3S)
         duration_str = content_details.get("duration", "PT0S")
@@ -260,7 +265,7 @@ class VideoProcessor:
 
             # Calculate view velocity (views gained since last check)
             views_gained = new_views - old_views
-            time_elapsed_hours = (datetime.now(timezone.utc) - old_data.get("updated_at", datetime.now(timezone.utc))).total_seconds() / 3600
+            time_elapsed_hours = (datetime.now(UTC) - old_data.get("updated_at", datetime.now(UTC))).total_seconds() / 3600
             view_velocity = int(views_gained / time_elapsed_hours) if time_elapsed_hours > 0 else 0
 
             # Update all fresh metadata
@@ -269,8 +274,8 @@ class VideoProcessor:
                 "like_count": metadata.like_count,
                 "comment_count": metadata.comment_count,
                 "view_velocity": view_velocity,
-                "updated_at": datetime.now(timezone.utc),
-                "last_seen_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
+                "last_seen_at": datetime.now(UTC),
             })
 
             # Needs rescore if views increased significantly (>10% or >1000 views)
@@ -290,6 +295,49 @@ class VideoProcessor:
             # On error, treat as new video
             return (False, False)
 
+    def _load_ip_configs_cached(self) -> list[dict[str, Any]]:
+        """
+        Load IP configs from Firestore with in-memory caching.
+
+        Cache is refreshed every 5 minutes to avoid network calls on every video.
+
+        Returns:
+            List of IP config dicts with id, search_keywords, and characters
+        """
+        global _ip_configs_cache, _ip_configs_cache_time
+
+        now = datetime.now(UTC)
+
+        # Return cached configs if still fresh
+        if (_ip_configs_cache is not None and
+            _ip_configs_cache_time is not None and
+            (now - _ip_configs_cache_time).total_seconds() < _IP_CACHE_TTL_SECONDS):
+            return _ip_configs_cache
+
+        # Refresh cache
+        try:
+            docs = self.firestore.collection("ip_configs").stream()
+            configs = []
+
+            for doc in docs:
+                data = doc.to_dict()
+                configs.append({
+                    "id": doc.id,
+                    "search_keywords": data.get("search_keywords", []),
+                    "characters": data.get("characters", []),
+                })
+
+            _ip_configs_cache = configs
+            _ip_configs_cache_time = now
+            logger.info(f"Loaded {len(configs)} IP configs into cache")
+
+            return configs
+
+        except Exception as e:
+            logger.error(f"Error loading IP configs: {e}")
+            # Return stale cache if available, otherwise empty list
+            return _ip_configs_cache if _ip_configs_cache else []
+
     def match_ips(self, metadata: VideoMetadata) -> list[str]:
         """
         Match video content against configured IP targets.
@@ -300,7 +348,7 @@ class VideoProcessor:
         - Video tags
         - Channel name
 
-        Loads IP configs from Firestore and matches keywords.
+        Uses cached IP configs (refreshed every 5 minutes).
 
         Args:
             metadata: Video metadata to analyze
@@ -309,28 +357,28 @@ class VideoProcessor:
             List of matched IP IDs (e.g., ["dc-universe"])
         """
         try:
-            # Load all IP configs from Firestore
-            docs = self.firestore.collection("ip_configs").stream()
+            # Load IP configs from cache (fast!)
+            configs = self._load_ip_configs_cached()
 
             matched_ids = []
             search_text = f"{metadata.title} {metadata.description} {' '.join(metadata.tags)} {metadata.channel_title}".lower()
 
-            for doc in docs:
-                data = doc.to_dict()
-                keywords = data.get("search_keywords", [])
-                characters = data.get("characters", [])
+            for config in configs:
+                keywords = config["search_keywords"]
+                characters = config["characters"]
+                ip_id = config["id"]
 
                 # Match keywords or character names
                 for keyword in keywords:
                     if keyword.lower() in search_text:
-                        matched_ids.append(doc.id)
+                        matched_ids.append(ip_id)
                         break
 
                 # Also check character names if no keyword match
-                if doc.id not in matched_ids:
+                if ip_id not in matched_ids:
                     for char in characters:
                         if char.lower() in search_text:
-                            matched_ids.append(doc.id)
+                            matched_ids.append(ip_id)
                             break
 
             return matched_ids
@@ -366,7 +414,7 @@ class VideoProcessor:
 
             # Calculate simple risk based on infringement history
             infringing_count = channel_data.get("infringing_videos_count", 0)
-            total_videos = channel_data.get("total_videos_found", 0)
+            channel_data.get("total_videos_found", 0)
             videos_scanned = channel_data.get("videos_scanned", 0)
 
             # If has confirmed infringements, HIGH RISK
@@ -436,7 +484,7 @@ class VideoProcessor:
             risk += 5
 
         # Factor 5: Recent videos get priority
-        age_days = (datetime.now(timezone.utc) - metadata.published_at).days
+        age_days = (datetime.now(UTC) - metadata.published_at).days
         if age_days <= 7:
             risk += 5
         elif age_days <= 30:
@@ -502,7 +550,7 @@ class VideoProcessor:
                     logger.warning(f"Failed to create channel profile for {metadata.channel_id}: {e}")
                     # Don't fail the whole operation if channel profile fails
 
-            # Save to Firestore
+            # Save video document (single write - no stats updates in hot path)
             doc_ref = self.firestore.collection(self.videos_collection).document(
                 metadata.video_id
             )
@@ -510,8 +558,8 @@ class VideoProcessor:
             video_doc = {
                 **metadata.model_dump(),
                 "status": VideoStatus.DISCOVERED.value,
-                "discovered_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
+                "discovered_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
             }
 
             doc_ref.set(video_doc)
@@ -526,12 +574,19 @@ class VideoProcessor:
             # Increment global video count
             self._increment_global_stat("total_videos", 1)
 
-            # Publish to PubSub
+            # Publish to PubSub (non-blocking - don't wait for confirmation)
             message_data = metadata.model_dump_json().encode("utf-8")
             future = self.publisher.publish(self.topic_path, message_data)
-            message_id = future.result(timeout=settings.pubsub_timeout_seconds)
 
-            logger.info(f"Published video {metadata.video_id} to PubSub: {message_id}")
+            # Add callback for logging (async, won't block)
+            def log_publish_result(f):
+                try:
+                    message_id = f.result()
+                    logger.info(f"Published video {metadata.video_id} to PubSub: {message_id}")
+                except Exception as e:
+                    logger.error(f"Failed to publish video {metadata.video_id}: {e}")
+
+            future.add_done_callback(log_publish_result)
 
             return True
 
