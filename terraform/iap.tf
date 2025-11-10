@@ -21,32 +21,32 @@ resource "google_iap_brand" "oauth_brand" {
 }
 
 # OAuth Client for IAP (EXTERNAL - manually created, DO NOT DESTROY)
-# Client ID: REDACTED_CLIENT_ID
 # This is managed externally in Google Cloud Console and should NEVER be destroyed
+# Credentials are stored in Secret Manager and must be set manually:
+#
+# gcloud secrets create iap-oauth-client-id --data-file=- <<EOF
+# YOUR_CLIENT_ID_HERE
+# EOF
+#
+# gcloud secrets create iap-oauth-client-secret --data-file=- <<EOF
+# YOUR_CLIENT_SECRET_HERE
+# EOF
+
+# Store OAuth client ID in Secret Manager (create manually first)
+data "google_secret_manager_secret_version" "iap_oauth_client_id" {
+  secret  = "iap-oauth-client-id"
+  project = var.project_id
+}
+
+# Store OAuth client secret in Secret Manager (create manually first)
+data "google_secret_manager_secret_version" "iap_oauth_client_secret" {
+  secret  = "iap-oauth-client-secret"
+  project = var.project_id
+}
+
 locals {
-  iap_client_id     = "REDACTED_CLIENT_ID"
-  iap_client_secret = "REDACTED_SECRET"
-}
-
-# Store OAuth client secret in Secret Manager
-resource "google_secret_manager_secret" "iap_oauth_client_secret" {
-  secret_id = "iap-oauth-client-secret"
-
-  replication {
-    auto {}
-  }
-
-  labels = {
-    service = "copycat"
-    purpose = "iap-auth"
-  }
-
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_secret_manager_secret_version" "iap_oauth_client_secret" {
-  secret      = google_secret_manager_secret.iap_oauth_client_secret.id
-  secret_data = local.iap_client_secret
+  iap_client_id     = data.google_secret_manager_secret_version.iap_oauth_client_id.secret_data
+  iap_client_secret = data.google_secret_manager_secret_version.iap_oauth_client_secret.secret_data
 }
 
 # Global static IP address for load balancer
