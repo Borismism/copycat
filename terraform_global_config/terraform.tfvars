@@ -5,8 +5,9 @@
 # ==============================================================================
 
 # GCP Project Configuration
-project_id = "copycat-429012"              # ← FILL THIS
-region     = "europe-west4"
+project_id  = "copycat-429012"
+region      = "europe-west4"
+environment = "prod"
 
 # GitHub Repository (for Workload Identity Federation)
 github_repository = "Borismism/copycat"
@@ -21,8 +22,12 @@ state_bucket = "tf-state-copycat-429012"
 frontend_domain      = "copycat.borism.nl"        # ← FILL THIS
 iap_support_email    = "boris@nextnovate.com"        # ← FILL THIS
 iap_authorized_users = [
-  "user:boris@nextnovate.com",                    # ← UPDATE THIS
+  "user:boris@nextnovate.com",
+  "user:irdeto.poc@gmail.com"
 ]
+
+# Firestore Configuration
+firestore_database = "copycat"
 
 # YouTube API Configuration
 youtube_daily_quota        = "10000"  # Request increase via GCP Console if needed
