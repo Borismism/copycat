@@ -168,3 +168,4 @@ resource "google_iap_web_backend_service_iam_binding" "iap_users" {
   role                = "roles/iap.httpsResourceAccessor"
   members             = var.iap_authorized_users
 }
+# Resources imported: IAP brand, firestore indexes
