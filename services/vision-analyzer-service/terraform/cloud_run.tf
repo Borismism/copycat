@@ -146,3 +146,4 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
 
 # Note: IAM invoker permission is configured via dedicated push SA in iam.tf (Nexus pattern)
 # The PubSub subscription uses this dedicated SA for OIDC authentication
+# Deploy trigger Mon Nov 10 09:06:33 CET 2025

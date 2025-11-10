@@ -140,3 +140,4 @@ resource "google_cloud_run_v2_service" "api_service" {
 
 # Removed public access - API service is now protected by IAP
 # Only frontend-service can invoke (configured in frontend-service/terraform/iam.tf)
+# Deploy trigger Mon Nov 10 09:06:33 CET 2025

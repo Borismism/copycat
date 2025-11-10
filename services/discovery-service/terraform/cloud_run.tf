@@ -149,3 +149,4 @@ resource "google_cloud_run_v2_service" "discovery_service" {
     google_project_iam_member.secret_accessor,
   ]
 }
+# Deploy trigger Mon Nov 10 09:06:33 CET 2025

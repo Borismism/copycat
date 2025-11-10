@@ -89,3 +89,4 @@ resource "google_cloud_run_v2_service" "frontend_service" {
 
 # Note: IAP authentication is configured in global infrastructure (terraform/iap.tf)
 # This service is only accessible via the IAP-protected load balancer
+# Deploy trigger Mon Nov 10 09:06:33 CET 2025

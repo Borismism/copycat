@@ -133,3 +133,4 @@ resource "google_cloud_run_v2_service" "risk_analyzer_service" {
 }
 
 # Note: PubSub invoker permission is now handled via dedicated push SA in iam.tf
+# Deploy trigger Mon Nov 10 09:06:33 CET 2025
