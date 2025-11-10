@@ -12,7 +12,7 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
 
     scaling {
       min_instance_count = var.min_instances
-      max_instance_count = var.max_instances
+      max_instance_count = var.max_concurrent_videos # Limit concurrent videos to control costs
     }
 
     timeout = "${var.timeout_seconds}s" # Long timeout for video analysis

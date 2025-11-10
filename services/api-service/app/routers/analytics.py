@@ -2,23 +2,23 @@
 
 import logging
 import traceback
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from google.cloud import firestore
 
 from app.core.firestore_client import firestore_client
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Simple in-memory cache with TTL
-_cache: Dict[str, tuple[Any, datetime]] = {}
+_cache: dict[str, tuple[Any, datetime]] = {}
 _CACHE_TTL_SECONDS = 60  # 60 second cache for expensive queries
 
 
-def get_cached(key: str) -> Optional[Any]:
+def get_cached(key: str) -> Any | None:
     """Get value from cache if still valid."""
     if key in _cache:
         value, expires_at = _cache[key]
@@ -36,7 +36,7 @@ def set_cache(key: str, value: Any, ttl_seconds: int = _CACHE_TTL_SECONDS):
 
 
 @router.get("/hourly-stats")
-async def get_hourly_stats(hours: int = 24, start_date: Optional[str] = None):
+async def get_hourly_stats(hours: int = 24, start_date: str | None = None):
     """
     Get hourly activity statistics for timeline chart.
 
@@ -54,7 +54,6 @@ async def get_hourly_stats(hours: int = 24, start_date: Optional[str] = None):
         return cached
 
     try:
-        from datetime import timezone
         from dateutil import parser as date_parser
 
         # Use UTC for consistency
@@ -62,14 +61,14 @@ async def get_hourly_stats(hours: int = 24, start_date: Optional[str] = None):
             # Parse the provided start date and set to beginning of day in UTC
             start = date_parser.isoparse(start_date)
             if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
+                start = start.replace(tzinfo=UTC)
             else:
-                start = start.astimezone(timezone.utc)
+                start = start.astimezone(UTC)
             # Set to start of day
             start = start.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             # Use current day (midnight to now/midnight)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Initialize hourly buckets (UTC)
@@ -105,9 +104,9 @@ async def get_hourly_stats(hours: int = 24, start_date: Optional[str] = None):
 
             # Ensure timezone-aware
             if hour_dt.tzinfo is None:
-                hour_dt = hour_dt.replace(tzinfo=timezone.utc)
+                hour_dt = hour_dt.replace(tzinfo=UTC)
             else:
-                hour_dt = hour_dt.astimezone(timezone.utc)
+                hour_dt = hour_dt.astimezone(UTC)
 
             hour_key = hour_dt.isoformat()
 
@@ -126,13 +125,13 @@ async def get_hourly_stats(hours: int = 24, start_date: Optional[str] = None):
         return result
 
     except Exception as e:
-        logger.error(f"Failed to get hourly stats: {str(e)}")
+        logger.error(f"Failed to get hourly stats: {e!s}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to get hourly stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get hourly stats: {e!s}")
 
 
 @router.get("/daily-stats")
-async def get_daily_stats(days: int = 30, start_date: Optional[str] = None):
+async def get_daily_stats(days: int = 30, start_date: str | None = None):
     """
     Get daily activity statistics for monthly chart view.
 
@@ -150,7 +149,6 @@ async def get_daily_stats(days: int = 30, start_date: Optional[str] = None):
         return cached
 
     try:
-        from datetime import timezone
         from dateutil import parser as date_parser
 
         # Use UTC for consistency
@@ -158,9 +156,9 @@ async def get_daily_stats(days: int = 30, start_date: Optional[str] = None):
             # Parse the provided start date and set to beginning of month in UTC
             start = date_parser.isoparse(start_date)
             if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
+                start = start.replace(tzinfo=UTC)
             else:
-                start = start.astimezone(timezone.utc)
+                start = start.astimezone(UTC)
             # Set to start of month (day 1)
             start = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -172,7 +170,7 @@ async def get_daily_stats(days: int = 30, start_date: Optional[str] = None):
             days = (next_month - start).days
         else:
             # Current month: start from 1st of current month
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
             # Calculate days in current month
@@ -213,9 +211,9 @@ async def get_daily_stats(days: int = 30, start_date: Optional[str] = None):
 
             # Ensure timezone-aware
             if hour_dt.tzinfo is None:
-                hour_dt = hour_dt.replace(tzinfo=timezone.utc)
+                hour_dt = hour_dt.replace(tzinfo=UTC)
             else:
-                hour_dt = hour_dt.astimezone(timezone.utc)
+                hour_dt = hour_dt.astimezone(UTC)
 
             # Get day key (truncate to day)
             day_dt = hour_dt.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -236,9 +234,9 @@ async def get_daily_stats(days: int = 30, start_date: Optional[str] = None):
         return result
 
     except Exception as e:
-        logger.error(f"Failed to get daily stats: {str(e)}")
+        logger.error(f"Failed to get daily stats: {e!s}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to get daily stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get daily stats: {e!s}")
 
 
 @router.get("/system-health")
@@ -349,9 +347,9 @@ async def get_system_health():
         }
 
     except Exception as e:
-        logger.error(f"Failed to get system health: {str(e)}")
+        logger.error(f"Failed to get system health: {e!s}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to get system health: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get system health: {e!s}")
 
 
 @router.get("/performance-metrics")
@@ -384,8 +382,7 @@ async def get_performance_metrics():
         # Note: Direct service-to-service calls don't work in Cloud Run (not Kubernetes)
         # Vision analyzer updates budget_tracking collection in Firestore
         try:
-            from datetime import timezone as tz
-            today = datetime.now(tz.utc).strftime("%Y-%m-%d")
+            today = datetime.now(UTC).strftime("%Y-%m-%d")
             budget_doc = firestore_client.db.collection("budget_tracking").document(today).get()
             if budget_doc.exists:
                 budget_data = budget_doc.to_dict()
@@ -400,14 +397,14 @@ async def get_performance_metrics():
                 budget_utilization = 0
                 daily_budget = 260.0  # Fallback to configured default (EUR)
         except Exception as e:
-            logger.error(f"Failed to get budget data: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to get budget data", e, severity="ERROR")
             total_spent = 0
             budget_utilization = 0
             daily_budget = 260.0
 
         # Queue health (pending videos) - use aggregation query for efficiency
         try:
-            from google.cloud.firestore_v1.aggregation import AggregationQuery, Count
+            from google.cloud.firestore_v1.aggregation import AggregationQuery
 
             # Use Firestore aggregation query (much faster than streaming)
             query = firestore_client.videos_collection.where("status", "==", "discovered")
@@ -450,7 +447,7 @@ async def get_performance_metrics():
             "queue_health": {
                 "pending": pending_videos,
                 "threshold": 5000,
-                "score": round(queue_score, 1),
+                "score": (queue_score),
                 "status": "excellent" if pending_videos < 5000 else "good" if pending_videos < 10000 else "warning",
             },
         }
@@ -460,9 +457,9 @@ async def get_performance_metrics():
         return result
 
     except Exception as e:
-        logger.error(f"Failed to get performance metrics: {str(e)}")
+        logger.error(f"Failed to get performance metrics: {e!s}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {e!s}")
 
 
 @router.get("/recent-events")
@@ -542,9 +539,9 @@ async def get_recent_events(limit: int = 20):
         }
 
     except Exception as e:
-        logger.error(f"Failed to get recent events: {str(e)}")
+        logger.error(f"Failed to get recent events: {e!s}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to get recent events: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get recent events: {e!s}")
 
 
 @router.get("/character-stats")
@@ -607,9 +604,9 @@ async def get_character_detection_stats():
         }
 
     except Exception as e:
-        logger.error(f"Failed to get character stats: {str(e)}")
+        logger.error(f"Failed to get character stats: {e!s}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to get character stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get character stats: {e!s}")
 
 
 @router.get("/overview")
@@ -632,6 +629,6 @@ async def get_analytics_overview():
         }
 
     except Exception as e:
-        logger.error(f"Failed to get overview: {str(e)}")
+        logger.error(f"Failed to get overview: {e!s}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to get overview: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get overview: {e!s}")

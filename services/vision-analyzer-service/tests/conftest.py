@@ -2,8 +2,8 @@
 
 import os
 import pytest
-from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock
+from datetime import datetime, UTC
+from unittest.mock import Mock
 
 # Set up environment variables for testing
 os.environ.setdefault("GCP_PROJECT_ID", "test-project")
@@ -59,6 +59,6 @@ def sample_video_metadata():
         risk_score=75.0,
         risk_tier="HIGH",
         matched_characters=["Superman", "Batman"],
-        discovered_at=datetime.now(timezone.utc),
-        last_risk_update=datetime.now(timezone.utc),
+        discovered_at=datetime.now(UTC),
+        last_risk_update=datetime.now(UTC),
     )

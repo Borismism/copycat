@@ -1,7 +1,7 @@
 """Tests for budget_manager.py"""
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import Mock, patch
 from app.core.budget_manager import BudgetManager
 

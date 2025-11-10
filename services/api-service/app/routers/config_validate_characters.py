@@ -1,13 +1,16 @@
 """
 Character validation endpoint using Gemini AI
 """
+import logging
+import os
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from google import genai
 from google.auth import default
 from google.cloud import firestore
-import os
-import logging
+from pydantic import BaseModel
+
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,7 +45,7 @@ async def validate_characters(request: ValidateCharactersRequest):
     """
     try:
         # Initialize Gemini client
-        credentials, project = default()
+        _credentials, _project = default()
         client = genai.Client(
             vertexai=True,
             project=os.getenv("GOOGLE_CLOUD_PROJECT", "copycat-429012"),
@@ -101,10 +104,10 @@ Respond ONLY with valid JSON, no other text."""
         )
 
     except Exception as e:
-        logger.error(f"Failed to validate characters: {e}")
+        log_exception_json(logger, "Failed to validate characters", e, severity="ERROR", ip_name=request.ip_name)
         raise HTTPException(
             status_code=500,
-            detail=f"Gemini API error: {str(e)}"
+            detail=f"Gemini API error: {e!s}"
         )
 
 
@@ -151,10 +154,10 @@ async def add_characters(request: AddCharactersRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to add characters: {e}")
+        log_exception_json(logger, "Failed to add characters", e, severity="ERROR", ip_id=request.ip_id)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to update configuration: {str(e)}"
+            detail=f"Failed to update configuration: {e!s}"
         )
 
 
@@ -250,10 +253,10 @@ async def save_ip_config(request: SaveIPConfigRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to save IP config: {e}")
+        log_exception_json(logger, "Failed to save IP config", e, severity="ERROR", ip_name=request.name)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to save configuration: {str(e)}"
+            detail=f"Failed to save configuration: {e!s}"
         )
 
 
@@ -285,8 +288,8 @@ async def list_ip_configs():
         return {"configs": configs}
 
     except Exception as e:
-        logger.error(f"Failed to list IP configs: {e}")
+        log_exception_json(logger, "Failed to list IP configs", e, severity="ERROR")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list configurations: {str(e)}"
+            detail=f"Failed to list configurations: {e!s}"
         )

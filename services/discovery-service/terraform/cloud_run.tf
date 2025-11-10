@@ -94,6 +94,11 @@ resource "google_cloud_run_v2_service" "discovery_service" {
         value = var.youtube_default_region
       }
 
+      env {
+        name  = "MAX_VIDEOS_TO_SCAN"
+        value = tostring(var.max_videos_to_scan)
+      }
+
       # Logging Configuration
       env {
         name  = "LOG_LEVEL"

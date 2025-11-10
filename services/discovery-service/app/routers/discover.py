@@ -1,9 +1,8 @@
 """Discovery router - Clean, simplified API endpoints."""
 
-import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -17,7 +16,7 @@ from ..core.search_randomizer import SearchRandomizer
 from ..core.search_history import SearchHistory
 from ..core.video_processor import VideoProcessor
 from ..core.youtube_client import YouTubeClient
-from ..models import DiscoveryStats
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -262,8 +261,8 @@ async def discover(
                     "completed_at": firestore.SERVER_TIMESTAMP,
                     "error_message": str(e),
                 })
-            except:
-                pass
+            except Exception as update_error:
+                log_exception_json(logger, "Failed to update discovery history after background failure", update_error, severity="WARNING", run_id=run_id)
 
     # Start background task (fire-and-forget)
     asyncio.create_task(run_discovery_background())
@@ -297,7 +296,6 @@ async def run_discovery_stream(
 
     # Create discovery history entry
     import uuid
-    from datetime import datetime, timezone
 
     run_id = str(uuid.uuid4())
     history_entry = {
@@ -364,7 +362,7 @@ async def run_discovery_stream(
                     elif data['type'] == 'query_result':
                         msg = f"✓ '{data['keyword']}' → {data['results_count']} videos (cost: {data['quota_used']:,} units)"
                         yield f"data: {json.dumps({'status': 'result', 'message': msg, 'keyword': data['keyword'], 'results': data['results_count']})}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # No event yet, check if discovery task is done
                     if discovery_task.done():
                         stats = await discovery_task
@@ -505,13 +503,13 @@ async def get_discovery_analytics(
 
         return {
             "quota": quota_stats,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
         logger.error(f"Failed to get analytics: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to get analytics: {str(e)}"
+            status_code=500, detail=f"Failed to get analytics: {e!s}"
         )
 
 
@@ -535,7 +533,7 @@ async def get_quota_status(
         "used": quota_manager.used_quota,
         "remaining": quota_manager.get_remaining(),
         "utilization_percent": quota_manager.get_utilization(),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -571,7 +569,7 @@ async def get_keyword_performance(
 
             # Calculate days since last search
             searched_at = data.get("searched_at")
-            days_since = (datetime.now(timezone.utc) - searched_at).days if searched_at else 999
+            days_since = (datetime.now(UTC) - searched_at).days if searched_at else 999
 
             # Get cooldown status
             cooldown_days = data.get("cooldown_days", 1)
@@ -624,13 +622,13 @@ async def get_keyword_performance(
             "by_tier": by_tier,
             "tier_summary": tier_summary,
             "total_keywords": len(keyword_stats),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
         logger.error(f"Failed to get keyword performance: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to get keyword performance: {str(e)}"
+            status_code=500, detail=f"Failed to get keyword performance: {e!s}"
         )
 
 
@@ -661,7 +659,7 @@ async def get_performance_metrics(
         from datetime import timedelta
 
         # Calculate date range
-        end_date = datetime.now(timezone.utc)
+        end_date = datetime.now(UTC)
         start_date = end_date - timedelta(days=days)
 
         # Query discovery metrics from Firestore
@@ -751,13 +749,13 @@ async def get_performance_metrics(
                 "used_today": quota_manager.used_quota,
                 "remaining_today": quota_manager.get_remaining(),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
         logger.error(f"Failed to get performance metrics: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to get performance metrics: {str(e)}"
+            status_code=500, detail=f"Failed to get performance metrics: {e!s}"
         )
 
 
@@ -807,5 +805,5 @@ async def scan_channel(
     except Exception as e:
         logger.error(f"Failed to scan channel {channel_id}: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to scan channel: {str(e)}"
+            status_code=500, detail=f"Failed to scan channel: {e!s}"
         )

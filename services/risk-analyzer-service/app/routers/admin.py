@@ -1,7 +1,6 @@
 """Admin endpoints for manual rescoring operations."""
 
 import logging
-from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel

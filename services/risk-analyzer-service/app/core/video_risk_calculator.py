@@ -6,7 +6,7 @@ This score represents 60% of the final scan priority.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,6 @@ class VideoRiskCalculator:
 
         # AI tool bonus (sora, runway, kling, pika, luma, veo, minimax)
         # Use whole word matching for single-word tools, phrase matching for multi-word
-        import re
         ai_tools = ["sora", "runway", "kling", "pika", "luma", "veo", "minimax", "ai generated", "ai movie"]
         has_ai_tool = False
 
@@ -269,7 +268,7 @@ class VideoRiskCalculator:
         else:
             pub_dt = published_at
 
-        age_days = (datetime.now(timezone.utc) - pub_dt).days
+        age_days = (datetime.now(UTC) - pub_dt).days
 
         # Recent videos: no survivor bonus
         if age_days <= 30:

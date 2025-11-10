@@ -5,8 +5,9 @@ import json
 import logging
 from fastapi import APIRouter, Request
 
-from google.cloud import firestore, pubsub_v1
+from google.cloud import firestore
 from ..core.risk_analyzer import RiskAnalyzer
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -45,7 +46,7 @@ async def process_video_discovered(request: Request):
         return {"status": "ok"}
 
     except Exception as e:
-        logger.error(f"Error processing video-discovered: {e}", exc_info=True)
+        log_exception_json(logger, "Error processing video-discovered", e, severity="ERROR")
         # Return 200 anyway to avoid retries for unrecoverable errors
         return {"status": "error", "message": str(e)}
 
@@ -83,5 +84,5 @@ async def process_vision_feedback(request: Request):
         return {"status": "ok"}
 
     except Exception as e:
-        logger.error(f"Error processing vision-feedback: {e}", exc_info=True)
+        log_exception_json(logger, "Error processing vision-feedback", e, severity="ERROR")
         return {"status": "error", "message": str(e)}

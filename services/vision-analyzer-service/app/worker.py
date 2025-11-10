@@ -4,12 +4,11 @@ import json
 import logging
 import threading
 from concurrent.futures import TimeoutError
-from typing import Optional
 
 from google.cloud import firestore, bigquery, pubsub_v1
 
 from .config import settings
-from .models import ScanReadyMessage, VideoMetadata
+from .models import ScanReadyMessage
 from .core.video_config_calculator import VideoConfigCalculator
 from .core.prompt_builder import PromptBuilder
 from .core.gemini_client import GeminiClient
@@ -17,6 +16,7 @@ from .core.budget_manager import BudgetManager
 from .core.result_processor import ResultProcessor
 from .core.video_analyzer import VideoAnalyzer
 from .core.config_loader import ConfigLoader
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -24,12 +24,12 @@ logger = logging.getLogger(__name__)
 MINIMUM_SCAN_PRIORITY = 0  # Scan everything from top to bottom until budget depleted
 
 # Global instances (initialized in start_worker)
-video_analyzer: Optional[VideoAnalyzer] = None
-budget_manager: Optional[BudgetManager] = None
-config_loader: Optional[ConfigLoader] = None
-worker_thread: Optional[threading.Thread] = None
-subscriber: Optional[pubsub_v1.SubscriberClient] = None
-subscription_path: Optional[str] = None
+video_analyzer: VideoAnalyzer | None = None
+budget_manager: BudgetManager | None = None
+config_loader: ConfigLoader | None = None
+worker_thread: threading.Thread | None = None
+subscriber: pubsub_v1.SubscriberClient | None = None
+subscription_path: str | None = None
 
 
 def start_worker():
@@ -92,7 +92,7 @@ def start_worker():
         worker_thread.start()
 
     except Exception as e:
-        logger.error(f"Failed to start PubSub worker: {e}", exc_info=True)
+        log_exception_json(logger, "Failed to start PubSub worker", e, severity="ERROR")
         raise
 
 
@@ -149,7 +149,7 @@ def get_videos_by_priority(limit: int = 100, min_priority: int = MINIMUM_SCAN_PR
         return videos
 
     except Exception as e:
-        logger.error(f"Error querying videos by priority: {e}", exc_info=True)
+        log_exception_json(logger, "Error querying videos by priority", e, severity="ERROR")
         return []
 
 
@@ -355,7 +355,7 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
             })
             logger.info(f"Updated scan history {scan_id} to completed")
         except Exception as e:
-            logger.error(f"Failed to update scan history: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to update scan history", e, severity="ERROR")
 
     except ValueError as e:
         # Check if it's a PERMISSION_DENIED error (video not accessible)
@@ -376,8 +376,8 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
                         "error_type": "PERMISSION_DENIED",
                     })
                     logger.info(f"Updated scan history {scan_id} to skipped")
-                except:
-                    pass
+                except Exception as update_error:
+                    log_exception_json(logger, "Failed to update scan history for PERMISSION_DENIED video", update_error, severity="WARNING", scan_id=scan_id)
 
             # Update video status to skipped (not failed)
             try:
@@ -403,7 +403,7 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
         raise
 
     except Exception as e:
-        logger.error(f"Failed to process message: {e}", exc_info=True)
+        log_exception_json(logger, "Failed to process message", e, severity="ERROR")
 
         # Update scan history to failed (only if scan_id was created)
         if scan_id:
@@ -415,8 +415,8 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
                     "error_message": str(e),
                 })
                 logger.info(f"Updated scan history {scan_id} to failed")
-            except:
-                pass
+            except Exception as update_error:
+                log_exception_json(logger, "Failed to update scan history after worker failure", update_error, severity="WARNING", scan_id=scan_id)
 
         # Update video status to failed with error details
         try:

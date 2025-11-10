@@ -1,7 +1,7 @@
 """Configuration models for the Copycat system."""
 
 from datetime import datetime
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -52,11 +52,11 @@ class CompanyInfo(BaseModel):
     )
 
     # Contact/legal info
-    legal_entity: Optional[str] = Field(None, description="Full legal entity name")
-    jurisdiction: Optional[str] = Field(None, description="Primary jurisdiction (e.g., 'United States')")
+    legal_entity: str | None = Field(None, description="Full legal entity name")
+    jurisdiction: str | None = Field(None, description="Primary jurisdiction (e.g., 'United States')")
 
     # Additional context
-    notes: Optional[str] = Field(None, description="Additional context or notes")
+    notes: str | None = Field(None, description="Additional context or notes")
 
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     updated_by: str = Field(default="system", description="Who last updated this config")
@@ -102,8 +102,8 @@ class ConfigUpdateResponse(BaseModel):
     proposed_changes: dict = Field(default_factory=dict)
 
     # Current vs new config
-    current_config: Optional[SystemConfig] = None
-    new_config: Optional[SystemConfig] = None
+    current_config: SystemConfig | None = None
+    new_config: SystemConfig | None = None
 
     # Applied or just proposed?
     applied: bool = Field(default=False)

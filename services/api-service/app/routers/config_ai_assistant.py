@@ -5,13 +5,13 @@ Uses Gemini to expand basic IP information into comprehensive detection configur
 including search keywords, visual markers, and AI tool detection patterns.
 """
 
+import json
+import os
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 from google import genai
 from google.auth import default
-import os
-import json
-from typing import Optional
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
@@ -21,11 +21,11 @@ class IPBasicInfo(BaseModel):
 
     name: str = Field(..., description="Name of the intellectual property (e.g., 'Harry Potter', 'Spider-Man')")
     company: str = Field(..., description="Company name (e.g., 'Warner Bros', 'Disney', 'Sony')")
-    explanation: Optional[str] = Field(
+    explanation: str | None = Field(
         default=None,
         description="Additional context or specific instructions for Gemini (e.g., 'Focus on main trilogy only', 'Include Mandalorian series')"
     )
-    priority: Optional[str] = Field(
+    priority: str | None = Field(
         default="medium",
         description="Business priority: low, medium, high, critical"
     )
@@ -404,14 +404,14 @@ async def generate_config_with_gemini(ip_info: IPBasicInfo) -> GeminiExpandedCon
 
     # Initialize Gemini client
     try:
-        credentials, _ = default()
+        _credentials, _ = default()
         client = genai.Client(
             vertexai=True,
             project=project,
             location=region
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to initialize Gemini client: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize Gemini client: {e!s}")
 
     # Create prompt
     prompt = create_keyword_expansion_prompt(ip_info)
@@ -442,7 +442,7 @@ async def generate_config_with_gemini(ip_info: IPBasicInfo) -> GeminiExpandedCon
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Gemini API error: {str(e)}"
+            detail=f"Gemini API error: {e!s}"
         )
 
 
@@ -506,7 +506,7 @@ class SuggestRequest(BaseModel):
     """Request to suggest more items for a specific section."""
     ip_name: str
     existing_items: list[str]
-    user_prompt: Optional[str] = None  # Optional user description of what they want
+    user_prompt: str | None = None  # Optional user description of what they want
 
 
 class SuggestResponse(BaseModel):
@@ -525,14 +525,14 @@ async def call_gemini_for_suggestions(prompt: str) -> list[str]:
     region = os.getenv("GEMINI_LOCATION", "europe-west1")
 
     try:
-        credentials, _ = default()
+        _credentials, _ = default()
         client = genai.Client(
             vertexai=True,
             project=project,
             location=region
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to initialize Gemini client: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to initialize Gemini client: {e!s}")
 
     try:
         response = client.models.generate_content(
@@ -549,7 +549,7 @@ async def call_gemini_for_suggestions(prompt: str) -> list[str]:
         return data.get("suggestions", [])
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Gemini error: {e!s}")
 
 
 @router.post("/suggest-characters", response_model=SuggestResponse)

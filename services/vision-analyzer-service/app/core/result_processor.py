@@ -9,7 +9,7 @@ This module handles:
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from google.cloud import firestore, bigquery, pubsub_v1
 
@@ -62,7 +62,7 @@ class ResultProcessor:
         """
         try:
             if timestamp is None:
-                timestamp = datetime.now(timezone.utc)
+                timestamp = datetime.now(UTC)
 
             # Round to hour
             hour = timestamp.replace(minute=0, second=0, microsecond=0)
@@ -120,7 +120,7 @@ class ResultProcessor:
             # Don't fail the main operation if stats update fails
             logger.warning(f"Failed to update system stats: {e}")
 
-    async def process_result(self, result: VisionAnalysisResult, channel_id: str = None, view_count: int = 0):
+    async def process_result(self, result: VisionAnalysisResult, channel_id: str | None = None, view_count: int = 0):
         """
         Process analysis result through all channels.
 
@@ -154,13 +154,21 @@ class ResultProcessor:
 
             if video_doc.exists:
                 video_data = video_doc.to_dict()
-                was_previously_analyzed = video_data.get("status") == "analyzed"
+                # Check if video has previous analysis (not just status, since worker sets status to "processing")
+                previous_analysis = video_data.get("analysis", {})
+                was_previously_analyzed = bool(previous_analysis and isinstance(previous_analysis, dict))
 
                 # Get previous infringement status if it was analyzed before
                 if was_previously_analyzed:
-                    previous_analysis = video_data.get("analysis", {})
-                    if isinstance(previous_analysis, dict):
-                        previous_had_infringement = previous_analysis.get("contains_infringement", False)
+                    previous_had_infringement = previous_analysis.get("contains_infringement", False)
+                    logger.debug(
+                        f"Video {result.video_id} rescan detected: previous_infringement={previous_had_infringement}, "
+                        f"new_infringement={has_infringement}"
+                    )
+                else:
+                    logger.debug(
+                        f"Video {result.video_id} first-time scan (no previous analysis found)"
+                    )
 
                 # Get channel_id and view_count if not provided
                 if not channel_id:
@@ -214,11 +222,17 @@ class ResultProcessor:
                     self._increment_hourly_stat("infringements", timestamp=result.analyzed_at)
 
             # 6. ALWAYS update channel stats (both clean and infringing videos)
-            await self._update_channel_scan_stats(channel_id, has_infringement, view_count, result.video_id)
+            await self._update_channel_scan_stats(
+                channel_id, has_infringement, view_count,
+                was_previously_analyzed, previous_had_infringement
+            )
 
             # 7. Update infringement tracking if violation found
             if has_infringement:
-                await self._update_channel_infringement_tracking(result, channel_id, view_count)
+                await self._update_channel_infringement_tracking(
+                    result, channel_id, view_count,
+                    was_previously_analyzed, previous_had_infringement
+                )
 
                 # 8. Alert on high confidence infringements
                 if max_likelihood >= 80:
@@ -412,7 +426,14 @@ class ResultProcessor:
             # Don't raise - feedback is important but not critical
             # Log error but continue
 
-    async def _update_channel_scan_stats(self, channel_id: str, has_infringement: bool, view_count: int, video_id: str = None):
+    async def _update_channel_scan_stats(
+        self,
+        channel_id: str,
+        has_infringement: bool,
+        view_count: int,
+        was_previously_analyzed: bool,
+        previous_had_infringement: bool | None
+    ):
         """
         Update channel scan statistics (ALWAYS called, regardless of infringement).
 
@@ -425,29 +446,13 @@ class ResultProcessor:
             channel_id: Channel ID
             has_infringement: Whether this video had an infringement
             view_count: Current view count of the video
-            video_id: Video ID (used to check previous classification)
+            was_previously_analyzed: Whether the video was previously analyzed
+            previous_had_infringement: Previous infringement status (None if not previously analyzed)
         """
         try:
             if not channel_id:
-                logger.warning(f"No channel_id provided, cannot update channel stats")
+                logger.warning("No channel_id provided, cannot update channel stats")
                 return
-
-            # Check if this is a re-scan (video was already analyzed)
-            was_previously_analyzed = False
-            previous_had_infringement = None
-
-            if video_id:
-                video_ref = self.firestore.collection("videos").document(video_id)
-                video_doc = video_ref.get()
-                if video_doc.exists:
-                    video_data = video_doc.to_dict()
-                    if video_data.get("status") == "analyzed":
-                        # Video was analyzed before
-                        was_previously_analyzed = True
-                        # Check what the previous result was
-                        analysis = video_data.get("analysis", {})
-                        if isinstance(analysis, dict):
-                            previous_had_infringement = analysis.get("contains_infringement", False)
 
             # Update channel document
             channel_ref = self.firestore.collection("channels").document(channel_id)
@@ -462,15 +467,15 @@ class ResultProcessor:
                     # Was infringement, now cleared
                     update_data["confirmed_infringements"] = firestore.Increment(-1)
                     update_data["videos_cleared"] = firestore.Increment(1)
-                    logger.info(f"Video {video_id} reclassified: infringement → cleared")
+                    logger.info(f"Channel {channel_id} video reclassified: infringement → cleared")
                 elif not previous_had_infringement and has_infringement:
                     # Was cleared, now infringement
                     update_data["videos_cleared"] = firestore.Increment(-1)
                     update_data["confirmed_infringements"] = firestore.Increment(1)
-                    logger.info(f"Video {video_id} reclassified: cleared → infringement")
+                    logger.info(f"Channel {channel_id} video reclassified: cleared → infringement")
                 else:
                     # Same classification - no change needed
-                    logger.debug(f"Video {video_id} re-analyzed with same result: infringement={has_infringement}")
+                    logger.debug(f"Channel {channel_id} video re-analyzed with same result: infringement={has_infringement}")
             else:
                 # First-time scan: increment videos_scanned and classification
                 update_data["videos_scanned"] = firestore.Increment(1)
@@ -484,14 +489,21 @@ class ResultProcessor:
 
             logger.info(
                 f"Updated channel {channel_id} scan stats: infringement={has_infringement}, "
-                f"was_rescan={was_previously_analyzed}"
+                f"was_rescan={was_previously_analyzed}, update_data_keys={list(update_data.keys())}"
             )
 
         except Exception as e:
             logger.error(f"Failed to update channel scan stats: {e}")
             # Don't raise - stats tracking is important but not critical
 
-    async def _update_channel_infringement_tracking(self, result: VisionAnalysisResult, channel_id: str, view_count: int):
+    async def _update_channel_infringement_tracking(
+        self,
+        result: VisionAnalysisResult,
+        channel_id: str,
+        view_count: int,
+        was_previously_analyzed: bool,
+        previous_had_infringement: bool | None
+    ):
         """
         Update channel metadata with infringement information.
 
@@ -501,28 +513,45 @@ class ResultProcessor:
             result: Analysis result with infringement
             channel_id: Channel ID
             view_count: Current view count of the video
+            was_previously_analyzed: Whether the video was previously analyzed
+            previous_had_infringement: Previous infringement status (None if not previously analyzed)
         """
         try:
             if not channel_id:
-                logger.warning(f"No channel_id provided, cannot update channel tracking")
+                logger.warning("No channel_id provided, cannot update channel tracking")
                 return
 
             # Update channel document
             channel_ref = self.firestore.collection("channels").document(channel_id)
 
-            # Use Firestore transaction to safely update counters
-            channel_ref.update({
+            update_data = {
                 "has_infringements": True,
-                "infringing_videos_count": firestore.Increment(1),
-                "total_infringing_views": firestore.Increment(view_count),
                 "last_infringement_date": firestore.SERVER_TIMESTAMP,
                 "infringing_video_ids": firestore.ArrayUnion([result.video_id]),
-            })
+            }
 
-            logger.info(
-                f"Updated channel {channel_id} infringement tracking: "
-                f"+1 infringement, +{view_count:,} views"
+            # Only increment counts if:
+            # 1. First-time scan with infringement, OR
+            # 2. Rescan that changed from cleared to infringement
+            should_increment = (
+                not was_previously_analyzed or
+                (was_previously_analyzed and previous_had_infringement is False)
             )
+
+            if should_increment:
+                update_data["infringing_videos_count"] = firestore.Increment(1)
+                update_data["total_infringing_views"] = firestore.Increment(view_count)
+                logger.info(
+                    f"Updated channel {channel_id} infringement tracking: "
+                    f"+1 infringement, +{view_count:,} views"
+                )
+            else:
+                logger.debug(
+                    f"Channel {channel_id} infringement tracking: "
+                    f"video {result.video_id} already counted (rescan with same result)"
+                )
+
+            channel_ref.update(update_data)
 
         except Exception as e:
             logger.error(f"Failed to update channel infringement tracking: {e}")

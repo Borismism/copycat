@@ -1,11 +1,14 @@
 """Firestore client for querying video and channel data."""
 
-from datetime import datetime, timedelta
+import logging
+from datetime import UTC, datetime, timedelta
 
 from google.cloud import firestore
 
 from app.core.config import settings
 from app.models import ChannelProfile, ChannelStats, ChannelTier, VideoMetadata, VideoStatus
+
+logger = logging.getLogger(__name__)
 
 
 class FirestoreClient:
@@ -168,10 +171,10 @@ class FirestoreClient:
         sort_by: str = "last_seen_at",
         sort_desc: bool = True,
         limit: int = 20,
-        offset: int = 0,
-    ) -> tuple[list[ChannelProfile], int]:
+        cursor: str | None = None,
+    ) -> tuple[list[ChannelProfile], int, str | None]:
         """
-        List channels with filters and pagination.
+        List channels with cursor-based pagination (FAST!).
 
         Args:
             min_risk: Minimum risk score filter
@@ -179,14 +182,11 @@ class FirestoreClient:
             sort_by: Field to sort by
             sort_desc: Sort descending
             limit: Maximum results
-            offset: Skip first N results
+            cursor: Channel ID to start after (for pagination)
 
         Returns:
-            Tuple of (channels list, total count)
+            Tuple of (channels list, total count, next_cursor)
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        from datetime import datetime, timezone
 
         # Step 1: Get total count from system_stats
         try:
@@ -217,8 +217,14 @@ class FirestoreClient:
         firestore_sort_field = firestore_sort_fields.get(sort_by, "last_seen_at")
         query = query.order_by(firestore_sort_field, direction=sort_direction)
 
-        # Apply pagination at Firestore level
-        query = query.limit(limit).offset(offset)
+        # FAST: Cursor-based pagination using start_after (O(1) instead of O(n)!)
+        if cursor:
+            cursor_doc = self.channels_collection.document(cursor).get()
+            if cursor_doc.exists:
+                query = query.start_after(cursor_doc)
+
+        # Fetch limit + 1 to check if there's more
+        query = query.limit(limit + 1)
 
         # Execute query
         channel_docs = list(query.stream())
@@ -243,7 +249,7 @@ class FirestoreClient:
             channel_data = {
                 "channel_id": channel_id,
                 "channel_title": data.get("channel_title", "Unknown"),
-                "discovered_at": data.get("discovered_at", datetime.now(timezone.utc)),  # Required field!
+                "discovered_at": data.get("discovered_at", datetime.now(UTC)),  # Required field!
                 "total_videos_found": total_videos_found,  # Pre-aggregated
                 "confirmed_infringements": confirmed_infringements,  # Pre-aggregated
                 "videos_cleared": videos_cleared,  # Pre-aggregated
@@ -272,9 +278,17 @@ class FirestoreClient:
                 # Skip invalid channels
                 continue
 
-        # Filtering/sorting/pagination already done at Firestore level
-        logger.info(f"Returning {len(all_channels)} channels (total in DB: {total_channels})")
-        return all_channels, total_channels
+        # Check if we have more results (we fetched limit + 1)
+        has_more = len(channel_docs) > limit
+
+        # Only return `limit` channels
+        channels_to_return = all_channels[:limit]
+
+        # Next cursor is the last channel's ID (if has_more)
+        next_cursor = channels_to_return[-1].channel_id if (channels_to_return and has_more) else None
+
+        logger.info(f"Returning {len(channels_to_return)} channels (total in DB: {total_channels}, has_more: {has_more})")
+        return channels_to_return, total_channels, next_cursor
 
     async def get_channel_stats(self) -> ChannelStats:
         """Get channel tier distribution statistics."""
@@ -332,8 +346,7 @@ class FirestoreClient:
 
     async def get_24h_summary(self) -> dict:
         """Get 24-hour activity summary."""
-        from datetime import timezone
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         yesterday = now - timedelta(hours=24)
 
         # Count videos discovered in last 24h - USE AGGREGATION!

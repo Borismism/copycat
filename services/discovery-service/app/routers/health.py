@@ -1,7 +1,7 @@
 """Health check router."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, HTTPException
 
@@ -29,7 +29,7 @@ async def health_check() -> HealthResponse:
         return HealthResponse(
             status="healthy",
             service=settings.service_name,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             version=settings.version,
             dependencies={
                 "firestore": "healthy",

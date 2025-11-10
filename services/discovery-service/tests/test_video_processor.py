@@ -1,7 +1,7 @@
 """Tests for VideoProcessor class."""
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from unittest.mock import MagicMock
 
 from app.core.video_processor import VideoProcessor
@@ -184,7 +184,7 @@ class TestExtractMetadata:
 
         # Should fallback to current time
         assert isinstance(metadata.published_at, datetime)
-        assert (datetime.now(timezone.utc) - metadata.published_at).seconds < 5
+        assert (datetime.now(UTC) - metadata.published_at).seconds < 5
 
     def test_extract_metadata_missing_video_id(self, video_processor):
         """Test extraction fails without video ID."""
@@ -306,7 +306,7 @@ class TestIsDuplicate:
         """Test returns True for recently processed video."""
         doc_mock = MagicMock()
         doc_mock.exists = True
-        doc_mock.to_dict.return_value = {"discovered_at": datetime.now(timezone.utc)}
+        doc_mock.to_dict.return_value = {"discovered_at": datetime.now(UTC)}
 
         mock_firestore.collection.return_value.document.return_value.get.return_value = doc_mock
 
@@ -319,7 +319,7 @@ class TestIsDuplicate:
         doc_mock = MagicMock()
         doc_mock.exists = True
         doc_mock.to_dict.return_value = {
-            "discovered_at": datetime.now(timezone.utc) - timedelta(days=10)
+            "discovered_at": datetime.now(UTC) - timedelta(days=10)
         }
 
         mock_firestore.collection.return_value.document.return_value.get.return_value = doc_mock
@@ -347,7 +347,7 @@ class TestIsDuplicate:
         doc_mock = MagicMock()
         doc_mock.exists = True
         doc_mock.to_dict.return_value = {
-            "discovered_at": datetime.now(timezone.utc) - timedelta(days=5)
+            "discovered_at": datetime.now(UTC) - timedelta(days=5)
         }
 
         mock_firestore.collection.return_value.document.return_value.get.return_value = doc_mock
@@ -379,7 +379,7 @@ class TestMatchIPs:
             title="Superman AI Generated Movie",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
         )
 
         result = video_processor.match_ips(metadata)
@@ -394,7 +394,7 @@ class TestMatchIPs:
             title="AI Movie",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             description="This is a Batman movie made with AI",
         )
 
@@ -413,7 +413,7 @@ class TestMatchIPs:
             title="AI Animation",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             tags=["Wonder Woman", "AI", "DC"],
         )
 
@@ -432,7 +432,7 @@ class TestMatchIPs:
             title="Latest Upload",
             channel_id="UC_test",
             channel_title="Flash AI Movies",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
         )
 
         flash_target = MagicMock()
@@ -450,7 +450,7 @@ class TestMatchIPs:
             title="Superman vs Batman AI Movie",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
         )
 
         superman_target = MagicMock()
@@ -472,7 +472,7 @@ class TestMatchIPs:
             title="Random Video",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
         )
 
         mock_ip_manager.match_content.return_value = []
@@ -494,7 +494,7 @@ class TestSaveAndPublish:
             title="Test Video",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             matched_ips=["Superman"],
         )
 
@@ -513,7 +513,7 @@ class TestSaveAndPublish:
             title="Test Video",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
         )
 
         video_processor.save_and_publish(metadata)
@@ -536,7 +536,7 @@ class TestSaveAndPublish:
             title="Test Video",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
         )
 
         mock_firestore.collection.return_value.document.return_value.set.side_effect = (
@@ -556,7 +556,7 @@ class TestSaveAndPublish:
             title="Test Video",
             channel_id="UC_test",
             channel_title="Test Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
         )
 
         mock_pubsub.publish.side_effect = Exception("PubSub error")
@@ -592,7 +592,7 @@ class TestProcessBatch:
         # Make video appear as duplicate
         doc_mock = MagicMock()
         doc_mock.exists = True
-        doc_mock.to_dict.return_value = {"discovered_at": datetime.now(timezone.utc)}
+        doc_mock.to_dict.return_value = {"discovered_at": datetime.now(UTC)}
         mock_firestore.collection.return_value.document.return_value.get.return_value = doc_mock
 
         video_list = [sample_video_data]
@@ -608,7 +608,7 @@ class TestProcessBatch:
         # Make video appear as duplicate
         doc_mock = MagicMock()
         doc_mock.exists = True
-        doc_mock.to_dict.return_value = {"discovered_at": datetime.now(timezone.utc)}
+        doc_mock.to_dict.return_value = {"discovered_at": datetime.now(UTC)}
         mock_firestore.collection.return_value.document.return_value.get.return_value = doc_mock
 
         video_list = [sample_video_data]
@@ -698,7 +698,7 @@ class TestCalculateInitialRisk:
 
     def test_calculate_initial_risk_new_channel_low_views(self, video_processor):
         """Test risk for new channel with low views."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VideoMetadata
 
@@ -707,7 +707,7 @@ class TestCalculateInitialRisk:
             title="Superman Video",
             channel_id="UC_new",
             channel_title="New Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             view_count=100,
             duration_seconds=180,  # 3 min
             matched_ips=["Justice League"],
@@ -721,7 +721,7 @@ class TestCalculateInitialRisk:
 
     def test_calculate_initial_risk_high_channel_viral_video(self, video_processor):
         """Test risk for high-risk channel with viral video."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.models import VideoMetadata
 
@@ -730,7 +730,7 @@ class TestCalculateInitialRisk:
             title="Batman AI Generated Movie",
             channel_id="UC_high_risk",
             channel_title="AI Movie Channel",
-            published_at=datetime.now(timezone.utc) - timedelta(days=3),
+            published_at=datetime.now(UTC) - timedelta(days=3),
             view_count=2_000_000,
             duration_seconds=900,  # 15 min
             matched_ips=["Justice League", "Batman", "Superman"],
@@ -744,7 +744,7 @@ class TestCalculateInitialRisk:
 
     def test_calculate_initial_risk_medium_scenario(self, video_processor):
         """Test risk for medium scenario."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.models import VideoMetadata
 
@@ -753,7 +753,7 @@ class TestCalculateInitialRisk:
             title="Wonder Woman Fan Video",
             channel_id="UC_medium",
             channel_title="Fan Channel",
-            published_at=datetime.now(timezone.utc) - timedelta(days=15),
+            published_at=datetime.now(UTC) - timedelta(days=15),
             view_count=50_000,
             duration_seconds=400,  # 6.5 min
             matched_ips=["Justice League", "Wonder Woman"],
@@ -767,7 +767,7 @@ class TestCalculateInitialRisk:
 
     def test_calculate_initial_risk_caps_at_100(self, video_processor):
         """Test risk score caps at 100."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from app.models import VideoMetadata
 
@@ -776,7 +776,7 @@ class TestCalculateInitialRisk:
             title="Full AI Generated Justice League Movie",
             channel_id="UC_max_risk",
             channel_title="AI Studio",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             view_count=10_000_000,
             duration_seconds=3600,  # 1 hour
             matched_ips=["Justice League", "Batman", "Superman", "Wonder Woman"],
@@ -790,7 +790,7 @@ class TestCalculateInitialRisk:
 
     def test_calculate_initial_risk_no_ips(self, video_processor):
         """Test risk with no IP matches (should be lowest)."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from app.models import VideoMetadata
 
@@ -799,7 +799,7 @@ class TestCalculateInitialRisk:
             title="Generic Video",
             channel_id="UC_clean",
             channel_title="Clean Channel",
-            published_at=datetime.now(timezone.utc) - timedelta(days=60),
+            published_at=datetime.now(UTC) - timedelta(days=60),
             view_count=500,
             duration_seconds=120,  # 2 min
             matched_ips=[],
@@ -866,7 +866,7 @@ class TestRiskScoringIntegration:
 
     def test_process_batch_high_risk_video(self, video_processor):
         """Test processing a high-risk video."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         high_risk_video = {
             "id": "high_risk_123",
@@ -874,7 +874,7 @@ class TestRiskScoringIntegration:
                 "title": "FULL AI Generated Superman Batman Movie - Sora AI",
                 "channelId": "UC_ai_studio",
                 "channelTitle": "AI Movie Studio",
-                "publishedAt": datetime.now(timezone.utc).isoformat(),
+                "publishedAt": datetime.now(UTC).isoformat(),
                 "description": "AI generated Justice League movie",
                 "tags": ["superman", "batman", "ai", "sora"],
             },

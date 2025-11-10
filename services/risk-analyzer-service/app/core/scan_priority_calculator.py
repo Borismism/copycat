@@ -13,6 +13,7 @@ from google.cloud import firestore
 
 from .channel_risk_calculator import ChannelRiskCalculator
 from .video_risk_calculator import VideoRiskCalculator
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +130,7 @@ class ScanPriorityCalculator:
                     "videos_per_month": 0,
                 }
         except Exception as e:
-            logger.error(f"Error fetching channel {channel_id}: {e}")
+            log_exception_json(logger, "Error fetching channel", e, severity="ERROR", channel_id=channel_id)
             return {
                 "channel_id": channel_id,
                 "infringing_videos_count": 0,
@@ -204,7 +205,7 @@ class ScanPriorityCalculator:
                 )
 
             except Exception as e:
-                logger.error(f"Error calculating priority for video {video_id}: {e}")
+                log_exception_json(logger, "Error calculating priority for video", e, severity="ERROR", video_id=video_id)
                 continue
 
         return results

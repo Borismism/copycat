@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     gemini_max_output_tokens: int = 40000  # Allow detailed responses (max is 65536)
 
     # Budget settings (in EUR)
-    daily_budget_eur: float = 260.0  # €260 daily budget
+    daily_budget_eur: float = 0.01  # €0.01 default (1 cent) - should be set via env var
     # NOTE: Gemini 2.5 Flash on Vertex AI uses Dynamic Shared Quota (DSQ)
     # No hard rate limits! Scales automatically based on availability
 

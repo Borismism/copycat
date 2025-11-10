@@ -9,7 +9,6 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional
 
 from google.cloud import firestore
 
@@ -45,7 +44,7 @@ class ConfigLoader:
         self.cache_ttl = int(os.getenv("CONFIG_CACHE_TTL_SECONDS", "300"))
         self.collection_name = os.getenv("IP_CONFIG_COLLECTION", "ip_configs")
 
-    def get_config(self, ip_id: str) -> Optional[IPConfig]:
+    def get_config(self, ip_id: str) -> IPConfig | None:
         """
         Get configuration for a specific IP.
 
@@ -106,7 +105,7 @@ class ConfigLoader:
 
         return configs
 
-    def invalidate_cache(self, ip_id: Optional[str] = None):
+    def invalidate_cache(self, ip_id: str | None = None):
         """
         Manually invalidate cache.
 
@@ -122,7 +121,7 @@ class ConfigLoader:
             self._cache_timestamps.clear()
             logger.info("Invalidated all config cache")
 
-    def _load_from_firestore(self, ip_id: str) -> Optional[IPConfig]:
+    def _load_from_firestore(self, ip_id: str) -> IPConfig | None:
         """Load config from Firestore."""
         try:
             doc = self.db.collection(self.collection_name).document(ip_id).get()
@@ -135,7 +134,7 @@ class ConfigLoader:
             logger.error(f"Error loading config {ip_id} from Firestore: {e}")
             return None
 
-    def _doc_to_config(self, doc) -> Optional[IPConfig]:
+    def _doc_to_config(self, doc) -> IPConfig | None:
         """Convert Firestore document to IPConfig."""
         try:
             data = doc.to_dict()

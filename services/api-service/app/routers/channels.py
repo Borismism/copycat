@@ -1,11 +1,13 @@
 """Channel management endpoints."""
 
 import json
-from fastapi import APIRouter, HTTPException, Query
 
-from app.core.firestore_client import firestore_client
-from app.models import ChannelListResponse, ChannelProfile, ChannelStats, ChannelTier, VideoStatus
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.core.auth import get_current_user
 from app.core.config import settings
+from app.core.firestore_client import firestore_client
+from app.models import ChannelListResponse, ChannelProfile, ChannelStats, ChannelTier, UserInfo, UserRole, VideoStatus
 
 router = APIRouter()
 
@@ -30,10 +32,10 @@ async def list_channels(
     sort_by: str = Query("last_seen_at", description="Field to sort by"),
     sort_desc: bool = Query(True, description="Sort descending"),
     limit: int = Query(20, ge=1, le=100, description="Maximum results per page"),
-    offset: int = Query(0, ge=0, description="Number of results to skip"),
+    cursor: str | None = Query(None, description="Cursor for pagination (channel_id)"),
 ):
     """
-    List channels with filters and pagination.
+    List channels with cursor-based pagination (FAST!).
 
     Args:
         min_risk: Minimum risk score (0-100)
@@ -42,31 +44,32 @@ async def list_channels(
         sort_by: Sort field (risk_score, last_scanned_at, etc.)
         sort_desc: Sort descending
         limit: Results per page
-        offset: Results to skip
+        cursor: Cursor (channel_id of last item from previous page)
 
     Returns:
-        Paginated channel list
+        Paginated channel list with next_cursor
     """
     try:
-        channels, total = await firestore_client.list_channels(
+        channels, total, next_cursor = await firestore_client.list_channels(
             min_risk=min_risk,
             tier=tier,
             action_status=action_status,
             sort_by=sort_by,
             sort_desc=sort_desc,
             limit=limit,
-            offset=offset,
+            cursor=cursor,
         )
 
-        return ChannelListResponse(
-            channels=channels,
-            total=total,
-            limit=limit,
-            offset=offset,
-            has_more=(offset + len(channels)) < total,
-        )
+        return {
+            "channels": channels,
+            "total": total,
+            "limit": limit,
+            "cursor": cursor,
+            "next_cursor": next_cursor,
+            "has_more": next_cursor is not None,
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list channels: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list channels: {e!s}")
 
 
 @router.get("/stats", response_model=ChannelStats)
@@ -75,7 +78,7 @@ async def get_channel_statistics():
     try:
         return await firestore_client.get_channel_stats()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get channel stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get channel stats: {e!s}")
 
 
 @router.get("/scan-history-with-processing")
@@ -91,15 +94,14 @@ async def get_scan_history_with_processing(
 
     Performance: <200ms regardless of page number!
     """
-    import time
     import logging
+    import time
     logger = logging.getLogger(__name__)
 
     start_time = time.time()
 
     try:
         from google.cloud import firestore as fs
-        import asyncio
 
         async def get_scan_hist():
             query_start = time.time()
@@ -191,7 +193,6 @@ async def get_scan_history_with_processing(
         pending_query_time = (time.time() - pending_query_start) * 1000
         logger.info(f"⏱️  Queued videos query: {pending_query_time:.2f}ms")
 
-        processing_videos = queued_videos
 
         # GROUP scans by video_id - show latest status per video
         processing_start = time.time()
@@ -280,8 +281,8 @@ async def get_scan_history_with_processing(
 
     except Exception as e:
         total_time = (time.time() - start_time) * 1000
-        logger.error(f"❌ Request failed after {total_time:.2f}ms: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get scan data: {str(e)}")
+        logger.error(f"❌ Request failed after {total_time:.2f}ms: {e!s}")
+        raise HTTPException(status_code=500, detail=f"Failed to get scan data: {e!s}")
 
 
 @router.get("/scan-history")
@@ -300,8 +301,9 @@ async def get_scan_history(limit: int = 50, offset: int = 0):
     - If ANY scan completed → status = "completed"
     """
     try:
-        from google.cloud import firestore as fs
         from collections import defaultdict
+
+        from google.cloud import firestore as fs
 
         # OPTIMIZED: Fetch only what we need
         # Most videos have 1-2 scan attempts, reduced from 3x to 2x multiplier
@@ -385,7 +387,7 @@ async def get_scan_history(limit: int = 50, offset: int = 0):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get scan history: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get scan history: {e!s}")
 
 
 @router.get("/{channel_id}", response_model=ChannelProfile)
@@ -399,15 +401,20 @@ async def get_channel(channel_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get channel: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get channel: {e!s}")
 
 
 @router.post("/{channel_id}/scan-all-videos")
-async def scan_all_videos(channel_id: str):
+async def scan_all_videos(
+    channel_id: str,
+    user: UserInfo = Depends(get_current_user)
+):
     """
     Queue all discovered videos for a channel for vision analysis.
 
     Publishes all videos to the scan-ready PubSub topic for processing by vision-analyzer-service.
+
+    Requires: EDITOR or ADMIN role
 
     Args:
         channel_id: Channel ID to scan all videos for
@@ -415,11 +422,15 @@ async def scan_all_videos(channel_id: str):
     Returns:
         Stats about queued videos
     """
-    from datetime import datetime, timezone
+    # Check permissions - only EDITOR, LEGAL, and ADMIN can trigger scans
+    if user.role not in [UserRole.EDITOR, UserRole.LEGAL, UserRole.ADMIN]:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Insufficient permissions. Role '{user.role.value}' cannot trigger scans. Required: editor, legal, or admin."
+        )
 
     # Get channel info
-    channel = await firestore_client.get_channel(channel_id)
-    channel_title = channel.channel_title if channel else channel_id
+    await firestore_client.get_channel(channel_id)
 
     # NOTE: scan_history entries will be created per-video by vision-analyzer worker
     # No batch operation tracking - only individual video scans
@@ -450,15 +461,14 @@ async def scan_all_videos(channel_id: str):
         videos_skipped = 0
 
         for video in videos:
-            # Skip already analyzed videos
-            if video.status == VideoStatus.ANALYZED:
-                videos_already_analyzed += 1
-                continue
-
-            # Skip videos currently processing
+            # Skip videos currently processing (to avoid duplicate scans)
             if video.status == VideoStatus.PROCESSING:
                 videos_skipped += 1
                 continue
+
+            # Track already analyzed videos (but still rescan them)
+            if video.status == VideoStatus.ANALYZED:
+                videos_already_analyzed += 1
 
             # Build scan message
             scan_message = {
@@ -496,4 +506,4 @@ async def scan_all_videos(channel_id: str):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to queue videos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue videos: {e!s}")

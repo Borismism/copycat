@@ -45,7 +45,7 @@ export default function ScanProgressModal({
 
   if (!videoProgress) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-8 text-center">
           <p className="text-gray-600">Loading scan progress...</p>
         </div>
@@ -116,7 +116,7 @@ export default function ScanProgressModal({
   // Show loading state while fetching video
   if (!video) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-8 text-center">
           <p className="text-gray-600">Loading video details...</p>
         </div>
@@ -126,7 +126,7 @@ export default function ScanProgressModal({
 
   // Full modal view
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex justify-between items-start">

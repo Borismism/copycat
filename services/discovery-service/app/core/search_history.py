@@ -6,8 +6,7 @@ time windows to avoid redundant queries.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timedelta, UTC
 import random
 
 from google.cloud import firestore
@@ -26,8 +25,8 @@ class SearchHistory:
         self,
         keyword: str,
         order: str,
-        time_window_days: Optional[int] = None
-    ) -> tuple[bool, Optional[dict]]:
+        time_window_days: int | None = None
+    ) -> tuple[bool, dict | None]:
         """
         Check if this search should be performed.
 
@@ -67,7 +66,7 @@ class SearchHistory:
         days: int = 7
     ) -> list[dict]:
         """Get recent searches for this keyword+order combination."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
 
         searches = (
             self.collection
@@ -97,7 +96,7 @@ class SearchHistory:
 
         Adapts window size based on keyword upload frequency.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Calculate average results per day from recent searches
         avg_results_per_day = self._estimate_upload_frequency(recent_searches)
@@ -128,14 +127,14 @@ class SearchHistory:
         days_since_last_search = 999  # Default: very long time
 
         if last_search:
-            time_since = (datetime.now(timezone.utc) - last_search['searched_at']).total_seconds() / 86400
+            time_since = (datetime.now(UTC) - last_search['searched_at']).total_seconds() / 86400
             days_since_last_search = int(time_since)
 
         # Calculate expected new videos since last search
         expected_new = avg_results_per_day * days_since_last_search
 
         # Calculate expected total videos (including rediscovered for virality tracking)
-        expected_total = avg_results_per_day * window_days
+        avg_results_per_day * window_days
 
         # INTELLIGENT VIRAL DETECTION BIAS
         # Balance: NEW discovery + VIRALITY tracking (rediscovered videos)
@@ -156,13 +155,13 @@ class SearchHistory:
             # Recent content: 30-365 days (30% chance)
             # Mix of new discovery + some virality tracking
             days_back = random.randint(30, 365)
-            logger.debug(f"📅 RECENT MIX: 30-365 days ago (new discoveries + virality)")
+            logger.debug("📅 RECENT MIX: 30-365 days ago (new discoveries + virality)")
         else:
             # Old content: 1-5 years (20% chance)
             # Pure new discovery focus
             max_days_back = 365 * 5
             days_back = random.randint(365, max_days_back)
-            logger.debug(f"🏛️ ARCHIVE: 1-5 years ago (pure discovery)")
+            logger.debug("🏛️ ARCHIVE: 1-5 years ago (pure discovery)")
 
         # Calculate random time window
         end_date = now - timedelta(days=days_back)
@@ -232,19 +231,19 @@ class SearchHistory:
         keyword: str,
         order: str,
         results_count: int,
-        time_window: Optional[dict] = None
+        time_window: dict | None = None
     ):
         """Record a search in history."""
         doc_data = {
             'keyword': keyword,
             'order': order,
             'results_count': results_count,
-            'searched_at': datetime.now(timezone.utc),
+            'searched_at': datetime.now(UTC),
             'time_window': time_window
         }
 
         # Use compound key: keyword_order_timestamp
-        doc_id = f"{keyword}_{order}_{int(datetime.now(timezone.utc).timestamp())}"
+        doc_id = f"{keyword}_{order}_{int(datetime.now(UTC).timestamp())}"
         doc_id = doc_id.replace(':', '_').replace(' ', '_')
 
         self.collection.document(doc_id).set(doc_data)

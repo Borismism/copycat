@@ -10,8 +10,10 @@ Key insight: Same keyword + different order = completely different top 250 resul
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from enum import Enum
+
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -35,14 +37,14 @@ class TimeWindow:
 
     def get_published_after(self) -> str:
         """Get publishedAfter parameter (ISO 8601)."""
-        dt = datetime.now(timezone.utc) - timedelta(days=self.days_ago_start)
+        dt = datetime.now(UTC) - timedelta(days=self.days_ago_start)
         return dt.isoformat().replace("+00:00", "Z")
 
     def get_published_before(self) -> str:
         """Get publishedBefore parameter (ISO 8601)."""
         if self.days_ago_end == 0:
-            return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        dt = datetime.now(timezone.utc) - timedelta(days=self.days_ago_end)
+            return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        dt = datetime.now(UTC) - timedelta(days=self.days_ago_end)
         return dt.isoformat().replace("+00:00", "Z")
 
 
@@ -139,7 +141,7 @@ class SearchRandomizer:
             return keywords
 
         except Exception as e:
-            logger.error(f"Failed to load keywords from Firestore: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to load keywords from Firestore", e, severity="ERROR")
             return []
 
     def _prioritize_keywords(self, max_keywords: int) -> list[str]:
@@ -198,7 +200,7 @@ class SearchRandomizer:
                 # Convert tier to int for sorting (handle both int and str)
                 tier_int = int(tier) if isinstance(tier, (int, str)) else 3
                 never_searched = info["last_searched"] is None
-                last_searched = info["last_searched"] or datetime.min.replace(tzinfo=timezone.utc)
+                last_searched = info["last_searched"] or datetime.min.replace(tzinfo=UTC)
 
                 # Return tuple: (tier, not never_searched, last_searched)
                 # - Lower tier = higher priority
@@ -229,7 +231,7 @@ class SearchRandomizer:
             return selected
 
         except Exception as e:
-            logger.error(f"Failed to prioritize keywords: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to prioritize keywords", e, severity="ERROR")
             logger.warning("Falling back to first N keywords")
             return self.keywords[:max_keywords]
 
@@ -280,7 +282,7 @@ class SearchRandomizer:
             logger.info(
                 f"🔄 KEYWORD-ONLY STRATEGY: No channels to scan, using all {keyword_quota} quota for keywords"
             )
-            logger.info(f"📺 No channels with infringements found yet")
+            logger.info("📺 No channels with infringements found yet")
 
         # Get all keywords grouped by tier
         if not self.firestore:
@@ -299,7 +301,7 @@ class SearchRandomizer:
         logger.info(f"📊 Will generate {max_queries} randomized keyword queries")
 
         # All-time search (no date filter)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         published_after = None  # All time!
         published_before = now.isoformat().replace("+00:00", "Z")
 
@@ -387,8 +389,8 @@ class SearchRandomizer:
             f"({num_channels} channels + {num_keywords} keywords), "
             f"{total_quota} quota units"
         )
-        logger.info(f"📅 Time: ALL TIME (no filter)")
-        logger.info(f"🎲 Random ordering with tier weighting: T1=50%, T2=35%, T3=15%")
+        logger.info("📅 Time: ALL TIME (no filter)")
+        logger.info("🎲 Random ordering with tier weighting: T1=50%, T2=35%, T3=15%")
 
         return search_plan
 
@@ -434,7 +436,7 @@ class SearchRandomizer:
             return by_tier
 
         except Exception as e:
-            logger.error(f"Failed to get keywords by tier: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to get keywords by tier", e, severity="ERROR")
             # Fallback: all keywords in Tier 3
             return {1: [], 2: [], 3: self.keywords}
 
@@ -481,7 +483,7 @@ class SearchRandomizer:
                     scan_history[channel_id] = last_scanned
 
             # Filter out recently scanned channels (< 7 days ago)
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             min_scan_interval = timedelta(days=7)
             channels_to_scan = []
 
@@ -493,7 +495,7 @@ class SearchRandomizer:
                     if isinstance(last_scanned, str):
                         last_scanned = datetime.fromisoformat(last_scanned.replace('Z', '+00:00'))
 
-                    time_since_scan = now - last_scanned.replace(tzinfo=timezone.utc)
+                    time_since_scan = now - last_scanned.replace(tzinfo=UTC)
                     if time_since_scan < min_scan_interval:
                         logger.debug(f"  ⏭️  Skipping {channel_id}: scanned {time_since_scan.days}d ago")
                         continue
@@ -516,7 +518,7 @@ class SearchRandomizer:
             return top_channels
 
         except Exception as e:
-            logger.error(f"Failed to get channels to scan: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to get channels to scan", e, severity="ERROR")
             return []
 
     def get_search_params_for_index(
@@ -549,7 +551,7 @@ class SearchRandomizer:
         keyword = self.keywords[keyword_idx]
 
         # Get rotation for this day
-        day_of_year = (datetime.now(timezone.utc) + timedelta(days=day_offset)).timetuple().tm_yday
+        day_of_year = (datetime.now(UTC) + timedelta(days=day_offset)).timetuple().tm_yday
         order_idx = day_of_year % len(self.orders)
         window_idx = (day_of_year // len(self.orders)) % len(self.time_windows)
 

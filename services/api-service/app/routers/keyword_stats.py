@@ -1,10 +1,11 @@
 """Keyword scan statistics API endpoints."""
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from google.cloud import firestore
-from datetime import datetime
 import os
+from datetime import datetime
+
+from fastapi import APIRouter, HTTPException
+from google.cloud import firestore
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -83,7 +84,7 @@ async def get_keyword_stats():
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get keyword statistics: {str(e)}"
+            detail=f"Failed to get keyword statistics: {e!s}"
         )
 
 
@@ -143,5 +144,5 @@ async def get_last_run_stats():
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get last run statistics: {str(e)}"
+            detail=f"Failed to get last run statistics: {e!s}"
         )

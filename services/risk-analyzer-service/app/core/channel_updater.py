@@ -6,10 +6,11 @@ Learns which channels are serial infringers to prioritize their content.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from google.cloud import firestore
 from .channel_risk_calculator import ChannelRiskCalculator
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ class ChannelUpdater:
         """
         Update channel risk after Gemini analysis.
 
+        IMPORTANT: For rescans, DON'T increment counters - vision-analyzer already handles this.
+
         Args:
             channel_id: Channel ID
             video_id: Video ID that was analyzed
@@ -56,6 +59,17 @@ class ChannelUpdater:
             Updated channel stats
         """
         try:
+            # Check if this is a rescan by checking scan_history collection
+            # (videos don't have scan_history field, it's a separate collection)
+            scan_history_query = self.firestore.collection('scan_history').where(
+                filter=firestore.FieldFilter('video_id', '==', video_id)
+            ).limit(2).stream()
+
+            scan_count = len(list(scan_history_query))
+            is_rescan = scan_count > 1
+
+            logger.debug(f"Processing feedback for video {video_id}: is_rescan={is_rescan}, scan_count={scan_count}")
+
             doc_ref = self.firestore.collection(self.channels_collection).document(channel_id)
             doc = doc_ref.get()
 
@@ -68,19 +82,23 @@ class ChannelUpdater:
                     "confirmed_infringements": 0,
                     "videos_cleared": 0,
                     "risk_score": 0,
-                    "created_at": datetime.now(timezone.utc),
+                    "created_at": datetime.now(UTC),
                 }
             else:
                 channel_data = doc.to_dict()
 
-            # Update counts
-            channel_data["total_videos_analyzed"] = channel_data.get("total_videos_analyzed", 0) + 1
+            # Update counts ONLY if not a rescan
+            # (vision-analyzer already handles rescan counter updates correctly)
+            if not is_rescan:
+                channel_data["total_videos_analyzed"] = channel_data.get("total_videos_analyzed", 0) + 1
 
-            if contains_infringement:
-                channel_data["confirmed_infringements"] = channel_data.get("confirmed_infringements", 0) + 1
-                channel_data["last_infringement_date"] = datetime.now(timezone.utc)
+                if contains_infringement:
+                    channel_data["confirmed_infringements"] = channel_data.get("confirmed_infringements", 0) + 1
+                    channel_data["last_infringement_date"] = datetime.now(UTC)
+                else:
+                    channel_data["videos_cleared"] = channel_data.get("videos_cleared", 0) + 1
             else:
-                channel_data["videos_cleared"] = channel_data.get("videos_cleared", 0) + 1
+                logger.info(f"Skipping counter increments for rescan of video {video_id}")
 
             # Recalculate risk score
             risk_result = self.risk_calculator.calculate_channel_risk(channel_data)
@@ -90,7 +108,7 @@ class ChannelUpdater:
             # Store risk score
             channel_data["channel_risk"] = new_risk
             channel_data["channel_risk_factors"] = risk_result["factors"]
-            channel_data["updated_at"] = datetime.now(timezone.utc)
+            channel_data["updated_at"] = datetime.now(UTC)
 
             # Save to Firestore
             doc_ref.set(channel_data, merge=True)
@@ -113,7 +131,7 @@ class ChannelUpdater:
             }
 
         except Exception as e:
-            logger.error(f"Error updating channel {channel_id}: {e}")
+            log_exception_json(logger, "Error updating channel", e, severity="ERROR", channel_id=channel_id)
             return {}
 
 

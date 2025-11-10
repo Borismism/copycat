@@ -6,9 +6,10 @@ based on 5 dynamic factors, enabling adaptive Gemini budget allocation.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from google.cloud import firestore
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,7 @@ class RiskRescorer:
         else:
             pub_date = published_at
 
-        age_days = (datetime.now(timezone.utc) - pub_date).days
+        age_days = (datetime.now(UTC) - pub_date).days
 
         # Recent videos = no adjustment (always urgent)
         if age_days <= 7:
@@ -388,7 +389,7 @@ class RiskRescorer:
                     doc_ref.update({
                         "current_risk": new_risk,
                         "risk_tier": rescore_result["new_tier"],
-                        "last_risk_update": datetime.now(timezone.utc),
+                        "last_risk_update": datetime.now(UTC),
                     })
 
                     logger.info(
@@ -397,7 +398,7 @@ class RiskRescorer:
                     )
 
             except Exception as e:
-                logger.error(f"Error rescoring video {video_id}: {e}")
+                log_exception_json(logger, "Error rescoring video", e, severity="ERROR", video_id=video_id)
                 continue
 
         return results

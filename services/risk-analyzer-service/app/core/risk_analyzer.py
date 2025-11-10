@@ -10,9 +10,8 @@ Coordinates all risk analysis operations:
 This is the main entry point for the risk-analyzer-service.
 """
 
-import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from google.cloud import firestore, pubsub_v1
 
@@ -20,6 +19,7 @@ from .channel_updater import ChannelUpdater
 from .risk_rescorer import RiskRescorer
 from .scan_priority_calculator import ScanPriorityCalculator
 from .view_velocity_tracker import ViewVelocityTracker
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ class RiskAnalyzer:
                 "priority_tier": priority_tier,
                 "channel_risk": channel_risk,
                 "video_risk": video_risk,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             })
 
             logger.info(
@@ -113,7 +113,7 @@ class RiskAnalyzer:
             )
 
         except Exception as e:
-            logger.error(f"Error processing discovered video: {e}", exc_info=True)
+            log_exception_json(logger, "Error processing discovered video", e, severity="ERROR")
 
     def process_discovered_video(self, message_data: dict) -> None:
         """
@@ -165,7 +165,7 @@ class RiskAnalyzer:
                 "priority_tier": priority_tier,
                 "channel_risk": channel_risk,
                 "video_risk": video_risk,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             })
 
             logger.info(
@@ -173,7 +173,7 @@ class RiskAnalyzer:
             )
 
         except Exception as e:
-            logger.error(f"Error processing discovered video: {e}", exc_info=True)
+            log_exception_json(logger, "Error processing discovered video", e, severity="ERROR")
 
     async def rescore_video_batch(self, video_ids: list[str]) -> dict:
         """
@@ -276,7 +276,7 @@ class RiskAnalyzer:
         Returns:
             Statistics about the analysis run
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
 
         logger.info("=== Starting continuous risk analysis ===")
 
@@ -292,7 +292,7 @@ class RiskAnalyzer:
             stats = self.rescore_video_batch(video_ids)
 
             # Calculate duration
-            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+            duration = (datetime.now(UTC) - start_time).total_seconds()
             stats["duration_seconds"] = duration
 
             logger.info(f"=== Analysis complete: {stats} ===")
@@ -353,7 +353,6 @@ class RiskAnalyzer:
             )
 
             # Recalculate priorities for all videos from this channel
-            import asyncio
 
             for video_doc in videos:
                 video_data = video_doc.to_dict()
@@ -373,7 +372,7 @@ class RiskAnalyzer:
                         "priority_tier": priority_tier,
                         "channel_risk": channel_risk,
                         "video_risk": video_risk,
-                        "updated_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(UTC),
                     }
                 )
 
@@ -388,7 +387,7 @@ class RiskAnalyzer:
             )
 
         except Exception as e:
-            logger.error(f"Error processing vision feedback: {e}", exc_info=True)
+            log_exception_json(logger, "Error processing vision feedback", e, severity="ERROR")
 
     def get_system_stats(self) -> dict:
         """
@@ -402,7 +401,7 @@ class RiskAnalyzer:
 
             stats = {
                 "scan_queue": queue_stats,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
             return stats

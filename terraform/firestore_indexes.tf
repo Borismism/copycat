@@ -126,6 +126,34 @@ resource "google_firestore_index" "videos_status_updated_at" {
   }
 }
 
+resource "google_firestore_index" "videos_channel_scan_priority_matched_ips" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  # Index for: .where("channel_id", "==", X).order_by("scan_priority", DESC).order_by("matched_ips", DESC)
+  # Required for channel videos page with sorting
+  fields {
+    field_path = "channel_id"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "scan_priority"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "matched_ips"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
 # Note: Single-field index for discovered_at is automatically created by Firestore
 # No composite index needed for: .where("discovered_at", ">=", start).order_by("discovered_at")
 # Correct firestore index imported

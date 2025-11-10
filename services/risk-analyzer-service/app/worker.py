@@ -8,13 +8,12 @@ import json
 import logging
 import threading
 import time
-from typing import Optional
 
 from google.cloud import firestore, pubsub_v1
-from google.api_core import retry
 
 from .config import settings
 from .core.risk_analyzer import RiskAnalyzer
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +43,10 @@ class PubSubWorker:
         )
 
         self.running = False
-        self.video_thread: Optional[threading.Thread] = None
-        self.feedback_thread: Optional[threading.Thread] = None
+        self.video_thread: threading.Thread | None = None
+        self.feedback_thread: threading.Thread | None = None
 
-        logger.info(f"PubSubWorker initialized")
+        logger.info("PubSubWorker initialized")
         logger.info(f"Video discovered subscription: {settings.pubsub_subscription_video_discovered}")
         logger.info(f"Vision feedback subscription: {settings.pubsub_subscription_vision_feedback}")
 
@@ -74,7 +73,7 @@ class PubSubWorker:
             logger.info(f"Successfully processed video {video_id}")
 
         except Exception as e:
-            logger.error(f"Error processing video-discovered message: {e}", exc_info=True)
+            log_exception_json(logger, "Error processing video-discovered message", e, severity="ERROR")
             # Nack the message to retry later
             message.nack()
 
@@ -102,7 +101,7 @@ class PubSubWorker:
             logger.info(f"Successfully processed vision feedback for {video_id}")
 
         except Exception as e:
-            logger.error(f"Error processing vision-feedback message: {e}", exc_info=True)
+            log_exception_json(logger, "Error processing vision-feedback message", e, severity="ERROR")
             # Nack the message to retry later
             message.nack()
 
@@ -152,7 +151,7 @@ class PubSubWorker:
                 streaming_pull_future.result(timeout=5)
 
             except Exception as e:
-                logger.error(f"Video-discovered subscriber error: {e}", exc_info=True)
+                log_exception_json(logger, "Video-discovered subscriber error", e, severity="ERROR")
                 if self.running:
                     logger.info("Restarting video-discovered subscriber in 5 seconds...")
                     time.sleep(5)
@@ -181,7 +180,7 @@ class PubSubWorker:
                 streaming_pull_future.result(timeout=5)
 
             except Exception as e:
-                logger.error(f"Vision-feedback subscriber error: {e}", exc_info=True)
+                log_exception_json(logger, "Vision-feedback subscriber error", e, severity="ERROR")
                 if self.running:
                     logger.info("Restarting vision-feedback subscriber in 5 seconds...")
                     time.sleep(5)
@@ -205,7 +204,7 @@ class PubSubWorker:
 
 
 # Global worker instance
-_worker: Optional[PubSubWorker] = None
+_worker: PubSubWorker | None = None
 
 
 def start_worker() -> PubSubWorker:
@@ -228,6 +227,6 @@ def stop_worker() -> None:
         _worker = None
 
 
-def get_worker() -> Optional[PubSubWorker]:
+def get_worker() -> PubSubWorker | None:
     """Get the global worker instance."""
     return _worker

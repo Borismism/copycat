@@ -147,12 +147,13 @@ class ChannelProfile(BaseModel):
 
 
 class ChannelListResponse(BaseModel):
-    """Paginated channel list response."""
+    """Paginated channel list response with cursor-based pagination."""
 
     channels: list[ChannelProfile]
     total: int
     limit: int
-    offset: int
+    cursor: str | None = None
+    next_cursor: str | None = None
     has_more: bool
 
 

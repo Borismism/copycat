@@ -9,7 +9,7 @@ This module coordinates the entire video analysis pipeline:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from ..models import VideoMetadata, VisionAnalysisResult
 from .video_config_calculator import VideoConfigCalculator
@@ -17,6 +17,7 @@ from .prompt_builder import PromptBuilder
 from .gemini_client import GeminiClient
 from .budget_manager import BudgetManager
 from .result_processor import ResultProcessor
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class VideoAnalyzer:
             # Step 7: Build complete result
             result = VisionAnalysisResult(
                 video_id=video_id,
-                analyzed_at=datetime.now(timezone.utc),
+                analyzed_at=datetime.now(UTC),
                 gemini_model=self.gemini_client.model_name,
                 analysis=analysis_result,
                 metrics=metrics,
@@ -167,11 +168,11 @@ class VideoAnalyzer:
             return result
 
         except Exception as e:
-            logger.error(f"Failed to analyze video {video_id}: {e}", exc_info=True)
+            log_exception_json(logger, f"Failed to analyze video {video_id}", e, severity="ERROR", video_id=video_id)
             raise
 
     async def analyze_batch(
-        self, videos: list[VideoMetadata], max_videos: int = None
+        self, videos: list[VideoMetadata], max_videos: int | None = None
     ) -> dict:
         """
         Analyze a batch of videos until budget exhausted or queue empty.
@@ -207,7 +208,7 @@ class VideoAnalyzer:
         errors = 0
         start_budget = self.budget_manager.get_remaining_budget()
 
-        for i, video in enumerate(sorted_videos):
+        for _i, video in enumerate(sorted_videos):
             # Check max_videos limit
             if max_videos and videos_analyzed >= max_videos:
                 logger.info(f"Reached max_videos limit: {max_videos}")

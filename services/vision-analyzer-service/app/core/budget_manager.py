@@ -4,10 +4,8 @@ This module tracks daily budget usage, enforces limits, and implements
 the budget exhaustion algorithm that maximizes daily spend utilization.
 """
 
-import asyncio
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 from google.cloud import firestore
 
@@ -43,10 +41,10 @@ class BudgetManager:
         self.budget_collection = settings.firestore_budget_collection
 
         # In-memory cache for current day
-        self._cached_date: Optional[str] = None
+        self._cached_date: str | None = None
         self._cached_total: float = 0.0
         self._video_count: int = 0
-        self._start_time: float = datetime.now(timezone.utc).timestamp()
+        self._start_time: float = datetime.now(UTC).timestamp()
 
         logger.info(f"Budget manager initialized: daily_budget=€{self.DAILY_BUDGET_EUR}")
 
@@ -94,7 +92,7 @@ class BudgetManager:
                     "total_spent_eur": firestore.Increment(actual_cost_eur),
                     "daily_budget_eur": self.DAILY_BUDGET_EUR,
                     "video_count": firestore.Increment(1),
-                    "last_updated": datetime.now(timezone.utc),
+                    "last_updated": datetime.now(UTC),
                 },
                 merge=True,
             )
@@ -196,7 +194,7 @@ class BudgetManager:
         """
         Reset session tracking (call at start of new scanning session).
         """
-        self._start_time = datetime.now(timezone.utc).timestamp()
+        self._start_time = datetime.now(UTC).timestamp()
         self._video_count = self.get_video_count_today()
         logger.info(f"Session reset: starting with {self._video_count} videos analyzed today")
 
@@ -230,4 +228,4 @@ class BudgetManager:
         Returns:
             Date string in YYYY-MM-DD format
         """
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return datetime.now(UTC).strftime("%Y-%m-%d")

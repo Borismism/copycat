@@ -1,7 +1,6 @@
 """Copycat API Gateway - Central API for managing and monitoring Copycat services."""
 
 import logging
-import traceback
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -9,7 +8,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.routers import analytics, channels, config, config_manager, config_ai_assistant, config_validate_characters, discovery, status, users, videos, vision_budget, keyword_stats
+from app.routers import (
+    analytics,
+    channels,
+    config,
+    config_ai_assistant,
+    config_manager,
+    config_validate_characters,
+    discovery,
+    keyword_stats,
+    status,
+    users,
+    videos,
+    vision_budget,
+)
+from app.utils.logging_utils import log_exception_json
 
 # Configure logging
 logging.basicConfig(
@@ -47,22 +60,33 @@ async def log_requests(request: Request, call_next):
         logger.info(f"✅ {request.method} {request.url.path} → {response.status_code}")
         return response
     except Exception as e:
-        logger.error(f"❌ {request.method} {request.url.path} → ERROR: {str(e)}", exc_info=True)
+        log_exception_json(
+            logger,
+            f"Middleware error on {request.method} {request.url.path}",
+            e,
+            severity="ERROR",
+            service="api-service",
+            path=str(request.url.path),
+            method=request.method
+        )
         raise
 
-# Global exception handler for 500 errors
+# Global exception handler for 500 errors with structured JSON logging
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Log all unhandled exceptions with full stack trace."""
-    tb = traceback.format_exc()
-    logger.error(
-        f"🔴 UNHANDLED EXCEPTION on {request.method} {request.url.path}:\n"
-        f"Error: {exc}\n"
-        f"Traceback:\n{tb}"
+    """Log all unhandled exceptions as structured JSON (single Cloud Run log entry)."""
+    log_exception_json(
+        logger,
+        f"Unhandled exception on {request.method} {request.url.path}",
+        exc,
+        severity="ERROR",
+        service="api-service",
+        path=str(request.url.path),
+        method=request.method
     )
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+        content={"detail": f"Internal server error: {type(exc).__name__}"}
     )
 
 # CORS middleware (allow frontend to call API)

@@ -1,7 +1,7 @@
 """Pydantic models for vision analyzer service."""
 
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -141,7 +141,7 @@ class IPSpecificResult(BaseModel):
     characters_detected: list[CharacterDetection]
     infringement_likelihood: float = Field(..., ge=0, le=100)
     reasoning: str
-    recommended_action: Literal["immediate_takedown", "monitor", "safe_harbor", "ignore"]
+    recommended_action: Literal["immediate_takedown", "tolerated", "monitor", "safe_harbor", "ignore"]
 
 
 class VisionAnalysisResult(BaseModel):

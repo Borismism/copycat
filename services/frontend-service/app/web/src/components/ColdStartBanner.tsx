@@ -71,7 +71,7 @@ export default function ColdStartBanner({ show }: ColdStartBannerProps) {
         </div>
 
         {/* Tips */}
-        <div className="text-xs text-gray-500 bg-white bg-opacity-50 rounded px-4 py-2 max-w-lg text-center">
+        <div className="text-xs text-gray-500 bg-white/50 rounded px-4 py-2 max-w-lg text-center">
           💡 Tip: Services will stay warm for a few minutes after the first request.
           Subsequent page loads will be instant.
         </div>

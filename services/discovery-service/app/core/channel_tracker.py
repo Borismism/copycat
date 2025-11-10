@@ -1,7 +1,7 @@
 """Simple channel tracking - saves channel metadata to Firestore."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from google.cloud import firestore
 
@@ -45,7 +45,7 @@ class ChannelTracker:
                 # Channel exists, update last_seen and increment video count
                 doc_ref.update({
                     "channel_title": channel_title,  # Update title in case it changed
-                    "last_seen_at": datetime.now(timezone.utc),
+                    "last_seen_at": datetime.now(UTC),
                     "video_count": Increment(1),  # Increment video count!
                 })
                 logger.debug(f"Updated channel: {channel_id} (video_count++)")
@@ -55,8 +55,8 @@ class ChannelTracker:
                 channel_data = {
                     "channel_id": channel_id,
                     "channel_title": channel_title,
-                    "discovered_at": datetime.now(timezone.utc),
-                    "last_seen_at": datetime.now(timezone.utc),
+                    "discovered_at": datetime.now(UTC),
+                    "last_seen_at": datetime.now(UTC),
                     "video_count": 1,  # First video!
                     "channel_risk": 40,  # Default risk for unknown channels (updated by risk-analyzer after scans)
                     "infringing_videos_count": 0,

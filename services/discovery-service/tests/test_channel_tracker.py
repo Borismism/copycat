@@ -1,7 +1,7 @@
 """Tests for ChannelTracker class."""
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from unittest.mock import MagicMock
 
 from app.core.channel_tracker import ChannelTracker
@@ -48,7 +48,7 @@ class TestGetOrCreateProfile:
 
     def test_get_existing_profile(self, channel_tracker, mock_firestore):
         """Test retrieving existing channel profile."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_data = {
             "channel_id": "UC_test_channel",
             "channel_title": "Test AI Channel",
@@ -107,7 +107,7 @@ class TestCalculateRiskScore:
 
     def test_calculate_risk_critical(self, channel_tracker):
         """Test CRITICAL risk score (80-100) for high infringement rate."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_critical",
             channel_title="High Infringer",
@@ -131,7 +131,7 @@ class TestCalculateRiskScore:
 
     def test_calculate_risk_high(self, channel_tracker):
         """Test HIGH risk score (60-79) for moderate infringement rate."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_high",
             channel_title="Moderate Infringer",
@@ -152,7 +152,7 @@ class TestCalculateRiskScore:
 
     def test_calculate_risk_medium(self, channel_tracker):
         """Test MEDIUM risk score (40-59) for low-moderate infringement rate."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_medium",
             channel_title="Low-Moderate Infringer",
@@ -172,7 +172,7 @@ class TestCalculateRiskScore:
 
     def test_calculate_risk_minimal_clean_channel(self, channel_tracker):
         """Test MINIMAL risk score (0-19) for clean channels."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_clean",
             channel_title="Clean Channel",
@@ -192,7 +192,7 @@ class TestCalculateRiskScore:
 
     def test_calculate_risk_newly_discovered(self, channel_tracker):
         """Test newly discovered channels get medium risk."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_new",
             channel_title="New Channel",
@@ -211,7 +211,7 @@ class TestCalculateRiskScore:
 
     def test_calculate_risk_time_decay(self, channel_tracker):
         """Test time decay reduces risk for old infringements."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_old",
             channel_title="Old Infringer",
@@ -237,7 +237,7 @@ class TestCalculateNextScanTime:
     def test_next_scan_critical(self, channel_tracker):
         """Test next scan time for CRITICAL risk (80-100) - 6 hours."""
         next_scan = channel_tracker.calculate_next_scan_time(risk_score=85)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected = now + timedelta(hours=6)
 
         # Allow 1 second tolerance for test execution time
@@ -246,7 +246,7 @@ class TestCalculateNextScanTime:
     def test_next_scan_high(self, channel_tracker):
         """Test next scan time for HIGH risk (60-79) - 24 hours."""
         next_scan = channel_tracker.calculate_next_scan_time(risk_score=70)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected = now + timedelta(hours=24)
 
         assert abs((next_scan - expected).total_seconds()) < 1
@@ -254,7 +254,7 @@ class TestCalculateNextScanTime:
     def test_next_scan_medium(self, channel_tracker):
         """Test next scan time for MEDIUM risk (40-59) - 72 hours."""
         next_scan = channel_tracker.calculate_next_scan_time(risk_score=50)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected = now + timedelta(hours=72)
 
         assert abs((next_scan - expected).total_seconds()) < 1
@@ -262,7 +262,7 @@ class TestCalculateNextScanTime:
     def test_next_scan_low(self, channel_tracker):
         """Test next scan time for LOW risk (20-39) - 168 hours."""
         next_scan = channel_tracker.calculate_next_scan_time(risk_score=30)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected = now + timedelta(hours=168)  # 7 days
 
         assert abs((next_scan - expected).total_seconds()) < 1
@@ -270,7 +270,7 @@ class TestCalculateNextScanTime:
     def test_next_scan_minimal(self, channel_tracker):
         """Test next scan time for MINIMAL risk (0-19) - 720 hours."""
         next_scan = channel_tracker.calculate_next_scan_time(risk_score=10)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expected = now + timedelta(hours=720)  # 30 days
 
         assert abs((next_scan - expected).total_seconds()) < 1
@@ -281,7 +281,7 @@ class TestUpdateAfterScan:
 
     def test_update_after_scan_with_videos(self, channel_tracker, mock_firestore):
         """Test updating profile after scan with videos found."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         latest_upload = now - timedelta(days=2)
         existing_data = {
             "channel_id": "UC_test",
@@ -315,7 +315,7 @@ class TestUpdateAfterScan:
 
     def test_update_after_scan_no_videos(self, channel_tracker, mock_firestore):
         """Test updating profile after scan without videos found."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_data = {
             "channel_id": "UC_test",
             "channel_title": "Test",
@@ -346,7 +346,7 @@ class TestUpdateAfterScan:
 
     def test_update_recalculates_risk_score(self, channel_tracker, mock_firestore):
         """Test risk score is recalculated after update."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         existing_data = {
             "channel_id": "UC_test",
             "channel_title": "Test",
@@ -392,7 +392,7 @@ class TestGetChannelsDueForScan:
 
     def test_get_channels_due_for_scan(self, channel_tracker, mock_firestore):
         """Test retrieving channels due for scan, sorted by risk score."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Mock 3 channels due for scan with different risk scores
         channel_data = [
@@ -458,7 +458,7 @@ class TestGetStatistics:
 
     def test_get_statistics(self, channel_tracker, mock_firestore):
         """Test calculating channel statistics."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         channel_data = [
             {

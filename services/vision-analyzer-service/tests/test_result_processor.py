@@ -1,8 +1,8 @@
 """Tests for result_processor.py"""
 
 import pytest
-from unittest.mock import Mock, AsyncMock, patch
-from datetime import datetime, timezone
+from unittest.mock import patch
+from datetime import datetime, UTC
 from app.core.result_processor import ResultProcessor
 from app.models import (
     VisionAnalysisResult,
@@ -28,7 +28,7 @@ class TestResultProcessor:
         """Create sample analysis result."""
         return VisionAnalysisResult(
             video_id="test_123",
-            analyzed_at=datetime.now(timezone.utc),
+            analyzed_at=datetime.now(UTC),
             gemini_model="gemini-2.5-flash",
             analysis=GeminiAnalysisResult(
                 contains_infringement=True,

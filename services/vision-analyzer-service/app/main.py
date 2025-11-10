@@ -1,7 +1,6 @@
 """FastAPI application for vision-analyzer service."""
 
 import logging
-import traceback
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +17,7 @@ from .core.budget_manager import BudgetManager
 from .core.result_processor import ResultProcessor
 from .core.video_analyzer import VideoAnalyzer
 from .core.config_loader import ConfigLoader
+from .utils.logging_utils import log_exception_json
 
 # Configure logging
 logging.basicConfig(
@@ -34,17 +34,22 @@ app = FastAPI(
     version=settings.version,
 )
 
-# Global exception handler with full stack traces
+# Global exception handler with structured JSON logging for Cloud Run
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Log all unhandled exceptions with full stack trace."""
-    logger.error(
-        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
-        exc_info=True
+    """Log all unhandled exceptions as structured JSON (single Cloud Run log entry)."""
+    log_exception_json(
+        logger,
+        f"Unhandled exception on {request.method} {request.url.path}",
+        exc,
+        severity="ERROR",
+        service="vision-analyzer",
+        path=str(request.url.path),
+        method=request.method
     )
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+        content={"detail": f"Internal server error: {type(exc).__name__}"}
     )
 
 # Add CORS middleware to allow frontend access
@@ -60,6 +65,84 @@ app.add_middleware(
 app.include_router(health.router, tags=["health"])
 app.include_router(admin.router, tags=["admin"])
 app.include_router(analyze.router, tags=["analyze"])
+
+
+async def _cleanup_stuck_videos(firestore_client: firestore.Client):
+    """
+    Clean up videos stuck in 'processing' state from previous instance crashes.
+
+    This handles cases where Cloud Run killed the instance (e.g., due to failed
+    health checks) before the background task could update video status.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    try:
+        logger.info("🔧 Checking for stuck videos from previous instance...")
+
+        # Find videos stuck in 'processing' for more than 60 minutes
+        # (Long videos + autoscaling means we need generous timeout)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=60)
+
+        videos_ref = firestore_client.collection(settings.firestore_videos_collection)
+        stuck_videos = videos_ref.where('status', '==', 'processing').stream()
+
+        reset_count = 0
+        for video_doc in stuck_videos:
+            video_id = video_doc.id
+            data = video_doc.to_dict()
+
+            # Check if stuck for more than 60 minutes
+            # IMPORTANT: Only check processing_started_at, not updated_at!
+            # updated_at can be stale from initial discovery
+            processing_started_at = data.get('processing_started_at')
+
+            # Skip if no processing_started_at (shouldn't happen, but be safe)
+            if not processing_started_at:
+                continue
+
+            if processing_started_at < cutoff_time:
+                # Video is stuck - reset it
+                logger.warning(
+                    f"🔧 Resetting stuck video {video_id}: "
+                    f"processing_started_at={processing_started_at}, duration={data.get('duration_seconds')}s"
+                )
+
+                video_doc.reference.update({
+                    'status': 'discovered',
+                    'processing_started_at': None,
+                    'error_message': 'Reset from stuck processing state (instance crash/kill)',
+                    'reset_at': firestore.SERVER_TIMESTAMP,
+                    'updated_at': firestore.SERVER_TIMESTAMP,
+                })
+
+                # Update related scan history to failed
+                scan_histories = firestore_client.collection('scan_history') \
+                    .where('video_id', '==', video_id) \
+                    .where('status', '==', 'running') \
+                    .stream()
+
+                for scan_doc in scan_histories:
+                    scan_doc.reference.update({
+                        'status': 'failed',
+                        'completed_at': firestore.SERVER_TIMESTAMP,
+                        'error_message': 'Scan reset - video stuck in processing (instance crash)',
+                    })
+
+                reset_count += 1
+
+        if reset_count > 0:
+            logger.info(f"✅ Reset {reset_count} stuck video(s)")
+        else:
+            logger.info("✅ No stuck videos found")
+
+    except Exception as e:
+        # Don't fail startup if cleanup fails
+        log_exception_json(
+            logger,
+            "Failed to cleanup stuck videos (non-fatal)",
+            e,
+            severity="WARNING"
+        )
 
 
 @app.on_event("startup")
@@ -81,6 +164,9 @@ async def startup_event():
         )
         bigquery_client = bigquery.Client(project=settings.gcp_project_id)
         pubsub_publisher = pubsub_v1.PublisherClient()
+
+        # Clean up stuck videos from previous instance crashes/kills
+        await _cleanup_stuck_videos(firestore_client)
 
         # Initialize core components
         config_calculator = VideoConfigCalculator()
@@ -127,13 +213,3 @@ async def shutdown_event():
     """Cleanup on shutdown."""
     logger.info(f"Shutting down {settings.service_name}")
     logger.info("Service shutdown complete")
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """Global exception handler."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )

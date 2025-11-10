@@ -6,8 +6,8 @@ WORKDIR /web
 # Copy package files
 COPY app/web/package.json app/web/package-lock.json* ./
 
-# Install dependencies
-RUN npm ci || npm install
+# Install dependencies with legacy peer deps to handle React 19
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
 # Copy source code
 COPY app/web/ ./
@@ -33,8 +33,9 @@ COPY pyproject.toml ./
 RUN uv venv && \
     uv pip install fastapi==0.119.1 uvicorn[standard]==0.34.0 pydantic==2.10.6 pydantic-settings==2.11.0 google-auth==2.42.0 requests==2.32.5 httpx==0.28.1 sse-starlette==3.0.2
 
-# Copy FastAPI proxy code
+# Copy FastAPI proxy code and utils
 COPY app/main.py ./main.py
+COPY app/utils ./utils
 
 # Copy built React SPA from stage 1
 COPY --from=frontend-build /web/dist ./static

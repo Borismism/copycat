@@ -1,7 +1,7 @@
 """Tests for ChannelDiscovery class."""
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from unittest.mock import MagicMock
 
 from app.core.channel_discovery import ChannelDiscovery
@@ -50,7 +50,7 @@ def channel_discovery(
 @pytest.fixture
 def sample_channel_profile():
     """Sample channel profile."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return ChannelProfile(
         channel_id="UC_test_123",
         channel_title="Test AI Channel",
@@ -140,7 +140,7 @@ class TestDiscoverFromChannels:
             title="Superman AI Movie",
             channel_id="UC_test_123",
             channel_title="Test AI Channel",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             matched_ips=["Superman"],
         )
         mock_video_processor.process_batch.return_value = [processed_video]
@@ -196,7 +196,7 @@ class TestDiscoverFromChannels:
         sample_video_data,
     ):
         """Test discovering from multiple channels."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Mock 3 channels
         channels = [
@@ -270,7 +270,7 @@ class TestDiscoverFromChannels:
         mock_youtube.get_channel_uploads.return_value = [sample_video_data]
 
         # Mock processed video WITH infringement
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mock_video_processor.process_batch.return_value = [
             VideoMetadata(
                 video_id="video_1",
@@ -322,7 +322,7 @@ class TestDiscoverFromChannels:
         sample_channel_profile,
     ):
         """Test discovery continues after channel error."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Two channels - first will error
         channels = [
@@ -387,7 +387,7 @@ class TestCountByTier:
 
     def test_count_by_tier(self, channel_discovery):
         """Test counting channels by tier."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         channels = [
             ChannelProfile(

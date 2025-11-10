@@ -1,7 +1,7 @@
 """Tests for ViewVelocityTracker class."""
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from unittest.mock import MagicMock
 
 from app.core.view_velocity_tracker import ViewVelocityTracker
@@ -73,7 +73,7 @@ class TestCalculateVelocity:
 
     def test_calculate_velocity_success(self, velocity_tracker, mock_firestore):
         """Test successful velocity calculation."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(hours=24)
 
         # Mock 2 snapshots
@@ -108,7 +108,7 @@ class TestCalculateVelocity:
 
     def test_calculate_velocity_high_growth(self, velocity_tracker, mock_firestore):
         """Test velocity calculation with high view growth."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(hours=1)
 
         current_snap = MagicMock()
@@ -137,7 +137,7 @@ class TestCalculateVelocity:
 
     def test_calculate_velocity_negative_growth(self, velocity_tracker, mock_firestore):
         """Test velocity handles negative growth (views decreased)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(hours=12)
 
         current_snap = MagicMock()
@@ -224,7 +224,7 @@ class TestUpdateAllVelocities:
 
     def test_update_all_velocities_success(self, velocity_tracker, mock_firestore):
         """Test batch updating velocities."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(hours=12)
 
         # Mock snapshots for video 1
@@ -276,7 +276,7 @@ class TestUpdateAllVelocities:
         self, velocity_tracker, mock_firestore
     ):
         """Test batch update with some failures."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(hours=12)
 
         # video_1 has snapshots
@@ -319,7 +319,7 @@ class TestGetHighVelocityVideos:
 
     def test_get_high_velocity_videos(self, velocity_tracker, mock_firestore):
         """Test retrieving high velocity videos."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         past = now - timedelta(hours=1)
 
         # Mock video documents

@@ -1,11 +1,12 @@
 """View velocity tracking for identifying viral videos."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from google.cloud import firestore
 
 from ..models import ViewVelocity
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ class ViewVelocityTracker:
             view_count: Current view count
         """
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             timestamp_key = now.strftime("%Y%m%d_%H%M%S")
 
             snapshot_ref = (
@@ -74,7 +75,7 @@ class ViewVelocityTracker:
             logger.debug(f"Recorded view snapshot for {video_id}: {view_count} views")
 
         except Exception as e:
-            logger.error(f"Error recording view snapshot for {video_id}: {e}")
+            log_exception_json(logger, "Error recording view snapshot", e, severity="ERROR", video_id=video_id)
 
     def calculate_velocity(self, video_id: str) -> ViewVelocity | None:
         """

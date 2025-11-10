@@ -1,10 +1,11 @@
 """Admin endpoints for manual operations and monitoring."""
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from app.utils.logging_utils import log_exception_json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ class TriggerAnalysisResponse(BaseModel):
     success: bool
     message: str
     video_id: str
-    cost_usd: Optional[float] = None
+    cost_usd: float | None = None
 
 
 class BatchScanRequest(BaseModel):
@@ -161,7 +162,7 @@ async def trigger_analysis(request: TriggerAnalysisRequest):
         )
 
     except Exception as e:
-        logger.error(f"Failed to trigger analysis: {e}", exc_info=True)
+        log_exception_json(logger, "Failed to trigger analysis", e, severity="ERROR")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -173,7 +174,6 @@ async def get_status():
     Returns:
         Service status
     """
-    from .. import worker
     from ..routers import analyze
 
     return {
@@ -221,7 +221,7 @@ async def trigger_mock_analysis(request: TriggerAnalysisRequest):
         if not doc.exists:
             raise HTTPException(status_code=404, detail=f"Video {request.video_id} not found")
 
-        data = doc.to_dict()
+        doc.to_dict()
 
         # Create mock analysis result
         mock_infringement = random.choice([True, False])
@@ -273,7 +273,7 @@ async def trigger_mock_analysis(request: TriggerAnalysisRequest):
         )
 
         # Store result in Firestore
-        result = AnalysisResult(
+        AnalysisResult(
             analysis=gemini_result,
             metrics=metrics
         )
@@ -296,7 +296,7 @@ async def trigger_mock_analysis(request: TriggerAnalysisRequest):
         )
 
     except Exception as e:
-        logger.error(f"Failed to trigger mock analysis: {e}", exc_info=True)
+        log_exception_json(logger, "Failed to trigger mock analysis", e, severity="ERROR")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -456,5 +456,5 @@ async def trigger_batch_scan(request: BatchScanRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to trigger batch scan: {e}", exc_info=True)
+        log_exception_json(logger, "Failed to trigger batch scan", e, severity="ERROR")
         raise HTTPException(status_code=500, detail=str(e))

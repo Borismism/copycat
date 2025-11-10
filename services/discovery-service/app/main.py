@@ -3,7 +3,6 @@
 
 import logging
 import sys
-import traceback
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from .config import settings
 from .routers import discover, health
+from .utils.logging_utils import log_exception_json
 
 # Setup logging with full stack traces
 logging.basicConfig(
@@ -38,14 +38,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global exception handler with full stack traces
+# Global exception handler with structured JSON logging for Cloud Run
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception: {exc}")
-    logger.error(traceback.format_exc())
+    """Log all unhandled exceptions as structured JSON (single Cloud Run log entry)."""
+    log_exception_json(
+        logger,
+        f"Unhandled exception on {request.method} {request.url.path}",
+        exc,
+        severity="ERROR",
+        service="discovery",
+        path=str(request.url.path),
+        method=request.method
+    )
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc), "type": type(exc).__name__}
+        content={"detail": f"Internal server error: {type(exc).__name__}"}
     )
 
 # Include routers

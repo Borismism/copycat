@@ -1,7 +1,7 @@
 """Test adaptive risk rescoring algorithm."""
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from unittest.mock import Mock
 
 from app.core.risk_rescorer import RiskRescorer
@@ -119,7 +119,7 @@ class TestCalculateAgeDecay:
     def test_very_old_video(self, rescorer):
         """Test video >6 months old."""
         video_data = {
-            "published_at": datetime.now(timezone.utc) - timedelta(days=200)
+            "published_at": datetime.now(UTC) - timedelta(days=200)
         }
         penalty = rescorer._calculate_age_decay(video_data)
         assert penalty == -15
@@ -127,7 +127,7 @@ class TestCalculateAgeDecay:
     def test_old_video(self, rescorer):
         """Test video >3 months old."""
         video_data = {
-            "published_at": datetime.now(timezone.utc) - timedelta(days=100)
+            "published_at": datetime.now(UTC) - timedelta(days=100)
         }
         penalty = rescorer._calculate_age_decay(video_data)
         assert penalty == -10
@@ -135,7 +135,7 @@ class TestCalculateAgeDecay:
     def test_month_old_video(self, rescorer):
         """Test video >1 month old."""
         video_data = {
-            "published_at": datetime.now(timezone.utc) - timedelta(days=40)
+            "published_at": datetime.now(UTC) - timedelta(days=40)
         }
         penalty = rescorer._calculate_age_decay(video_data)
         assert penalty == -5
@@ -143,7 +143,7 @@ class TestCalculateAgeDecay:
     def test_recent_video(self, rescorer):
         """Test recent video (<1 month)."""
         video_data = {
-            "published_at": datetime.now(timezone.utc) - timedelta(days=10)
+            "published_at": datetime.now(UTC) - timedelta(days=10)
         }
         penalty = rescorer._calculate_age_decay(video_data)
         assert penalty == 0
@@ -226,7 +226,7 @@ class TestRecalculateRisk:
             "view_count": 100_000,
             "like_count": 3_000,  # 3% engagement
             "comment_count": 2_000,
-            "published_at": datetime.now(timezone.utc) - timedelta(days=2),  # +0
+            "published_at": datetime.now(UTC) - timedelta(days=2),  # +0
         }
 
         result = rescorer.recalculate_risk(video_data)
@@ -245,7 +245,7 @@ class TestRecalculateRisk:
             "view_count": 50_000,
             "like_count": 1_000,  # 2% engagement = 0 (needs >2%)
             "comment_count": 0,
-            "published_at": datetime.now(timezone.utc) - timedelta(days=5),  # +0
+            "published_at": datetime.now(UTC) - timedelta(days=5),  # +0
             "gemini_result": {"contains_infringement": True},  # +20
         }
 
@@ -268,7 +268,7 @@ class TestRecalculateRisk:
             "view_count": 10_000,
             "like_count": 100,  # 1% engagement
             "comment_count": 0,
-            "published_at": datetime.now(timezone.utc) - timedelta(days=200),  # -15
+            "published_at": datetime.now(UTC) - timedelta(days=200),  # -15
             "gemini_result": {"contains_infringement": False},  # -10
         }
 
@@ -289,7 +289,7 @@ class TestRecalculateRisk:
             "view_count": 1_000_000,
             "like_count": 60_000,  # 6% engagement
             "comment_count": 0,
-            "published_at": datetime.now(timezone.utc) - timedelta(days=1),
+            "published_at": datetime.now(UTC) - timedelta(days=1),
             "gemini_result": {"contains_infringement": True},  # +20
         }
 
@@ -308,7 +308,7 @@ class TestRecalculateRisk:
             "view_count": 100,
             "like_count": 0,
             "comment_count": 0,
-            "published_at": datetime.now(timezone.utc) - timedelta(days=200),  # -15
+            "published_at": datetime.now(UTC) - timedelta(days=200),  # -15
             "gemini_result": {"contains_infringement": False},  # -10
         }
 

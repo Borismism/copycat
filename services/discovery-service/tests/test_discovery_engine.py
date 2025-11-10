@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
 
 from app.core.discovery_engine import DiscoveryEngine
 from app.models import ChannelProfile, VideoMetadata
@@ -336,7 +336,7 @@ class TestDiscoveryEngineDiscover:
         mock_quota_manager.can_afford.return_value = True
 
         # Execute with enough quota for keyword phase (tier4 = 45%)
-        stats = await discovery_engine.discover(max_quota=300)
+        await discovery_engine.discover(max_quota=300)
 
         # Verify keyword search was called
         assert mock_youtube_client.search_videos.call_count >= 1
@@ -387,7 +387,7 @@ class TestDiscoveryEngineDiscover:
         })
 
         # Execute
-        stats = await discovery_engine.discover(max_quota=100)
+        await discovery_engine.discover(max_quota=100)
 
         # Verify: continues despite error
         # Note: channels_tracked may be 0 due to tier naming inconsistency

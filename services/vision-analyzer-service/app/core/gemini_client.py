@@ -16,6 +16,7 @@ from google.api_core import exceptions as google_exceptions
 
 from ..config import settings
 from ..models import GeminiAnalysisResult, AnalysisMetrics
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class GeminiClient:
         Uses Application Default Credentials (service account in Cloud Run).
         """
         try:
-            credentials, project = default()
+            _credentials, project = default()
             logger.info(f"Using GCP project: {project}")
 
             client = genai.Client(
@@ -127,7 +128,7 @@ class GeminiClient:
             return analysis_result, metrics
 
         except Exception as e:
-            logger.error(f"Video analysis failed: {e}", exc_info=True)
+            log_exception_json(logger, "Video analysis failed", e, severity="ERROR")
             raise
 
     async def _call_gemini_with_retry(
@@ -165,7 +166,10 @@ class GeminiClient:
                 from google.genai.types import Part
 
                 # Build request with simplified content structure
-                response = self.client.models.generate_content(
+                # IMPORTANT: Run blocking Gemini API call in thread to avoid blocking event loop
+                # This ensures health checks can still respond during long video analysis
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
                     model=self.model_name,
                     contents=[
                         Part.from_uri(
@@ -235,7 +239,7 @@ class GeminiClient:
 
                 return response
 
-            except google_exceptions.ResourceExhausted as e:
+            except google_exceptions.ResourceExhausted:
                 # Rate limit hit
                 if attempt < max_retries - 1:
                     wait_time = backoff_delays[attempt]

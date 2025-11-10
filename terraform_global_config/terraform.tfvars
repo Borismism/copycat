@@ -23,7 +23,9 @@ frontend_domain      = "copycat.borism.nl"        # ← FILL THIS
 iap_support_email    = "boris@nextnovate.com"        # ← FILL THIS
 iap_authorized_users = [
   "user:boris@nextnovate.com",
-  "user:irdeto.poc@gmail.com"
+  "user:irdeto.poc@gmail.com",
+  "user:clara@nextnovate.com",
+  "user:bartjan@nextnovate.com"
 ]
 
 # Firestore Configuration
@@ -38,4 +40,6 @@ discovery_schedule = "0 * * * *"  # Every hour (quota distributed optimally per 
 
 # Gemini Configuration
 gemini_location         = "us-central1"  # Primary region for Gemini models
-daily_budget_eur        = "260"  # €260 for full production
+daily_budget_eur        = "260"          # €260 for full production (~20k-32k videos/day)
+max_concurrent_videos   = 50             # Process 50 videos concurrently (balanced throughput)
+max_videos_to_scan      = 500            # Queue max 500 videos per discovery run

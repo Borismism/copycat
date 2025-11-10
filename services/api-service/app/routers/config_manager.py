@@ -2,14 +2,16 @@
 
 import json
 import logging
+import os
 from datetime import datetime
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from google import genai
 from google.auth import default
 
+from app.core.auth import get_current_user, require_role
 from app.core.firestore_client import firestore_client
+from app.models import UserInfo, UserRole
 from app.models.config import (
     CompanyInfo,
     ConfigUpdateRequest,
@@ -17,19 +19,20 @@ from app.models.config import (
     IntellectualProperty,
     SystemConfig,
 )
+from app.utils.logging_utils import log_exception_json
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Gemini client (lazy init)
-_gemini_client: Optional[genai.Client] = None
+_gemini_client: genai.Client | None = None
 
 
 def get_gemini_client() -> genai.Client:
     """Get or create Gemini client."""
     global _gemini_client
     if _gemini_client is None:
-        credentials, project = default()
+        _credentials, project = default()
         _gemini_client = genai.Client(
             vertexai=True,
             project=project,
@@ -52,7 +55,7 @@ def load_system_config() -> SystemConfig:
         return SystemConfig(**data)
 
     except Exception as e:
-        logger.error(f"Failed to load system config: {e}")
+        log_exception_json(logger, "Failed to load system config", e, severity="ERROR")
         raise HTTPException(status_code=500, detail="Failed to load configuration")
 
 
@@ -69,7 +72,7 @@ def save_system_config(config: SystemConfig) -> bool:
         return True
 
     except Exception as e:
-        logger.error(f"Failed to save system config: {e}")
+        log_exception_json(logger, "Failed to save system config", e, severity="ERROR")
         return False
 
 
@@ -179,11 +182,14 @@ async def get_config():
 
 
 @router.post("/initialize")
-async def initialize_config():
+@require_role(UserRole.ADMIN)
+async def initialize_config(user: UserInfo = Depends(get_current_user)):
     """
     Initialize configuration with Warner Bros / Justice League defaults.
 
     Use this to set up the system for the first time or reset to defaults.
+
+    Requires: ADMIN role only
     """
     try:
         default_config = get_default_config()
@@ -199,12 +205,13 @@ async def initialize_config():
         }
 
     except Exception as e:
-        logger.error(f"Failed to initialize config: {e}")
+        log_exception_json(logger, "Failed to initialize config", e, severity="ERROR")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/update", response_model=ConfigUpdateResponse)
-async def update_config_natural_language(request: ConfigUpdateRequest):
+@require_role(UserRole.ADMIN, UserRole.EDITOR)
+async def update_config_natural_language(request: ConfigUpdateRequest, user: UserInfo = Depends(get_current_user)):
     """
     Update configuration using natural language.
 
@@ -217,6 +224,8 @@ async def update_config_natural_language(request: ConfigUpdateRequest):
     - "Add search keywords 'superman runway' and 'superman fashion' to Superman"
 
     Set apply_immediately=true to apply changes, or false to review first.
+
+    Requires: EDITOR or ADMIN role
     """
     try:
         # Load current config
@@ -398,7 +407,7 @@ Total: 47 keywords for 3 characters (comprehensive coverage)
 
             message = f"✅ Configuration updated: {changes_summary}"
             if warnings:
-                message += f"\n\nWarnings:\n" + "\n".join(f"- {w}" for w in warnings)
+                message += "\n\nWarnings:\n" + "\n".join(f"- {w}" for w in warnings)
 
             return ConfigUpdateResponse(
                 success=True,
@@ -420,8 +429,8 @@ Total: 47 keywords for 3 characters (comprehensive coverage)
             )
 
     except Exception as e:
-        logger.error(f"Failed to process config update: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to update configuration: {str(e)}")
+        log_exception_json(logger, "Failed to process config update", e, severity="ERROR")
+        raise HTTPException(status_code=500, detail=f"Failed to update configuration: {e!s}")
 
 
 @router.put("", response_model=SystemConfig)
@@ -440,5 +449,5 @@ async def update_config_directly(config: SystemConfig):
         return config
 
     except Exception as e:
-        logger.error(f"Failed to update config: {e}")
+        log_exception_json(logger, "Failed to update config", e, severity="ERROR")
         raise HTTPException(status_code=500, detail=str(e))

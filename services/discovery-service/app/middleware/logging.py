@@ -9,6 +9,7 @@ from pythonjsonlogger import jsonlogger
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..config import settings
+from ..utils.logging_utils import log_exception_json
 
 
 def setup_logging() -> None:
@@ -76,15 +77,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
 
-            logger.error(
+            log_exception_json(
+                logger,
                 "Request failed",
-                extra={
-                    "request_id": request_id,
-                    "method": request.method,
-                    "path": request.url.path,
-                    "error": str(e),
-                    "duration_ms": round(duration_ms, 2),
-                },
-                exc_info=True,
+                e,
+                severity="ERROR",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                duration_ms=round(duration_ms, 2),
             )
             raise

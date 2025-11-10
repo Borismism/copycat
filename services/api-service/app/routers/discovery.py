@@ -2,15 +2,15 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
 import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from google.cloud import firestore
 
-from app.core.discovery_client import discovery_client
-from app.core.firestore_client import firestore_client, FirestoreClient, get_firestore_client
-from app.core.config import settings
 from app.core.auth import get_current_user, require_role
+from app.core.config import settings
+from app.core.discovery_client import discovery_client
+from app.core.firestore_client import FirestoreClient, firestore_client, get_firestore_client
 from app.models import DiscoveryAnalytics, DiscoveryStats, DiscoveryTriggerRequest, QuotaStatus, UserInfo, UserRole
 
 router = APIRouter()
@@ -42,15 +42,18 @@ async def trigger_discovery(request: DiscoveryTriggerRequest, user: UserInfo = D
             timestamp=datetime.now(),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to trigger discovery: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger discovery: {e!s}")
 
 
 @router.get("/trigger/stream")
-async def trigger_discovery_stream(max_quota: int = 1000):
+@require_role(UserRole.ADMIN, UserRole.EDITOR)
+async def trigger_discovery_stream(max_quota: int = 1000, user: UserInfo = Depends(get_current_user)):
     """
     Trigger discovery with real-time SSE progress updates.
 
     Proxies SSE events from discovery service to frontend.
+
+    Requires: EDITOR or ADMIN role
     """
     async def event_generator():
         url = f"{settings.discovery_service_url}/discover/run/stream?max_quota={max_quota}"
@@ -97,7 +100,7 @@ async def get_quota_status():
             next_reset=quota_data.get("next_reset"),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get quota status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get quota status: {e!s}")
 
 
 @router.get("/analytics", response_model=DiscoveryAnalytics)
@@ -141,16 +144,18 @@ async def get_discovery_analytics():
             channel_count_by_tier=channel_stats,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {e!s}")
 
 
 @router.post("/discover/channel/{channel_id}/scan")
-async def scan_channel(channel_id: str, max_videos: int = 50):
+@require_role(UserRole.ADMIN, UserRole.EDITOR)
+async def scan_channel(channel_id: str, max_videos: int = 50, user: UserInfo = Depends(get_current_user)):
     """
     Scan a specific channel for videos.
     Proxies request to discovery service.
+
+    Requires: EDITOR or ADMIN role
     """
-    from datetime import datetime, timezone
 
     # NOTE: No scan_history tracking for discovery operations
     # Only per-video scans are tracked in scan_history
@@ -166,9 +171,9 @@ async def scan_channel(channel_id: str, max_videos: int = 50):
         return result
 
     except httpx.HTTPError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to scan channel: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to scan channel: {e!s}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to scan channel: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to scan channel: {e!s}")
 
 
 @router.get("/history")
@@ -179,11 +184,11 @@ async def get_discovery_history(
 ):
     """
     Get discovery run history with pagination.
-    
+
     Args:
         limit: Number of runs to return
         offset: Number of runs to skip
-    
+
     Returns:
         List of discovery runs
     """
@@ -192,24 +197,24 @@ async def get_discovery_history(
         query = firestore_client.db.collection("discovery_history").order_by(
             "started_at", direction=firestore.Query.DESCENDING
         )
-        
+
         all_runs = list(query.stream())
         total = len(all_runs)
-        
+
         # Apply pagination
         paginated_runs = all_runs[offset:offset+limit]
-        
+
         runs = []
         for doc in paginated_runs:
             data = doc.to_dict()
             runs.append(data)
-        
+
         return {
             "runs": runs,
             "total": total,
             "limit": limit,
             "offset": offset,
         }
-    
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch discovery history: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch discovery history: {e!s}")

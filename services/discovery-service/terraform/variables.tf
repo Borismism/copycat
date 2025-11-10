@@ -89,6 +89,12 @@ variable "discovery_schedule" {
   default     = "0 * * * *" # Every hour at minute 0
 }
 
+variable "max_videos_to_scan" {
+  description = "Maximum number of videos to queue for vision analysis per discovery run"
+  type        = number
+  default     = 500
+}
+
 variable "state_bucket" {
   description = "GCS bucket for Terraform state"
   type        = string

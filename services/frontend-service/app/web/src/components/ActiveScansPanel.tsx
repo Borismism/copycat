@@ -84,7 +84,7 @@ export default function ActiveScansPanel({
         <>
           {/* Backdrop */}
           <div
-            className="fixed inset-0 bg-black bg-opacity-30 z-40 transition-opacity"
+            className="fixed inset-0 bg-black/30 z-40 transition-opacity"
             onClick={() => setIsOpen(false)}
           />
 

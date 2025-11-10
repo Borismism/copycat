@@ -1,6 +1,6 @@
 """User role management endpoints."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -62,7 +62,7 @@ async def list_role_assignments(
         return RoleListResponse(assignments=assignments, total=total)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list role assignments: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list role assignments: {e!s}")
 
 
 @router.post("/roles", response_model=RoleAssignment)
@@ -99,7 +99,7 @@ async def create_role_assignment(
             )
 
         # Create assignment
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         assignment = RoleAssignment(
             email=request.email.lower() if request.email else None,
             domain=request.domain.lower() if request.domain else None,
@@ -125,7 +125,7 @@ async def create_role_assignment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create role assignment: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create role assignment: {e!s}")
 
 
 @router.put("/roles/{identifier}", response_model=RoleAssignment)
@@ -161,7 +161,7 @@ async def update_role_assignment(
         data["role"] = role.value
         data["notes"] = notes
         data["assigned_by"] = user.email
-        data["assigned_at"] = datetime.now(timezone.utc)
+        data["assigned_at"] = datetime.now(UTC)
 
         doc_ref.set(data)
 
@@ -183,7 +183,7 @@ async def update_role_assignment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update role assignment: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to update role assignment: {e!s}")
 
 
 @router.delete("/roles/{identifier}")
@@ -227,4 +227,4 @@ async def delete_role_assignment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete role assignment: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete role assignment: {e!s}")

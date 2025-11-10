@@ -1,11 +1,11 @@
 """IAP-based authentication and role-based access control."""
 
 import logging
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import wraps
-from typing import Callable
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 
 from app.core.config import settings
 from app.core.firestore_client import firestore_client
@@ -108,7 +108,7 @@ async def get_user_role(email: str) -> UserRole:
         UserRole enum
     """
     # Check cache first
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if email in _role_cache:
         cached_role, cached_at = _role_cache[email]
         if (now - cached_at).total_seconds() < _CACHE_TTL_SECONDS:

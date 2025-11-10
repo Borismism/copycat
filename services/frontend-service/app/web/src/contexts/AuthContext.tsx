@@ -45,6 +45,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         credentials: 'include',
       }
 
+      // For local development, send X-Dev-User header
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        headers['X-Dev-User'] = 'dev@copycat.local'
+      }
+
       // Add X-Act-As header for admin impersonation
       if (actAsEmail) {
         headers['X-Act-As'] = actAsEmail
@@ -65,8 +70,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // If acting as someone, keep track of real user
         if (!actualUser) {
           // First time acting as - fetch actual user
+          const actualHeaders: HeadersInit = {
+            credentials: 'include',
+          }
+
+          // For local development, send X-Dev-User header
+          if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            actualHeaders['X-Dev-User'] = 'dev@copycat.local'
+          }
+
           const actualResponse = await fetch('/api/users/me', {
             credentials: 'include',
+            headers: actualHeaders,
           })
           if (actualResponse.ok) {
             const actualUserData = await actualResponse.json()

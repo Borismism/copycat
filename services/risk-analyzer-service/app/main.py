@@ -1,13 +1,13 @@
 """FastAPI application for risk-analyzer service."""
 
 import logging
-import traceback
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .config import settings
 from .routers import admin, health, webhooks
+from .utils.logging_utils import log_exception_json
 
 # Configure logging
 logging.basicConfig(
@@ -24,17 +24,22 @@ app = FastAPI(
     version=settings.version,
 )
 
-# Global exception handler with full stack traces
+# Global exception handler with structured JSON logging for Cloud Run
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Log all unhandled exceptions with full stack trace."""
-    logger.error(
-        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
-        exc_info=True
+    """Log all unhandled exceptions as structured JSON (single Cloud Run log entry)."""
+    log_exception_json(
+        logger,
+        f"Unhandled exception on {request.method} {request.url.path}",
+        exc,
+        severity="ERROR",
+        service="risk-analyzer",
+        path=str(request.url.path),
+        method=request.method
     )
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+        content={"detail": f"Internal server error: {type(exc).__name__}"}
     )
 
 # Include routers

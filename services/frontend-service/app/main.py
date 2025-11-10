@@ -3,7 +3,6 @@
 
 import logging
 import os
-from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
@@ -11,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2 import id_token
 from pydantic_settings import BaseSettings
-from sse_starlette.sse import EventSourceResponse
 import httpx
+
+from utils.logging_utils import log_exception_json
 
 # Configure logging
 logging.basicConfig(
@@ -33,17 +33,22 @@ settings = Settings()
 
 app = FastAPI(title="Copycat Frontend")
 
-# Global exception handler with full stack traces
+# Global exception handler with structured JSON logging for Cloud Run
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Log all unhandled exceptions with full stack trace."""
-    logger.error(
-        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
-        exc_info=True
+    """Log all unhandled exceptions as structured JSON (single Cloud Run log entry)."""
+    log_exception_json(
+        logger,
+        f"Unhandled exception on {request.method} {request.url.path}",
+        exc,
+        severity="ERROR",
+        service="frontend",
+        path=str(request.url.path),
+        method=request.method
     )
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {str(exc)}"}
+        content={"detail": f"Internal server error: {type(exc).__name__}"}
     )
 
 
@@ -100,7 +105,7 @@ async def proxy_to_api(path: str, request: Request) -> Response:
             headers["authorization"] = f"Bearer {token}"
         except Exception as e:
             return Response(
-                content=f'{{"error": "Failed to fetch IAM token: {str(e)}"}}',
+                content=f'{{"error": "Failed to fetch IAM token: {e!s}"}}',
                 status_code=500,
                 media_type="application/json",
             )
@@ -163,7 +168,7 @@ async def proxy_to_api(path: str, request: Request) -> Response:
                 )
     except Exception as e:
         return Response(
-            content=f'{{"error": "Failed to proxy request: {str(e)}"}}',
+            content=f'{{"error": "Failed to proxy request: {e!s}"}}',
             status_code=502,
             media_type="application/json",
         )
@@ -179,7 +184,7 @@ async def health() -> dict[str, str]:
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 
 if os.path.exists(static_dir):
-    # Mount static directory for assets
+    # Mount assets directory first (takes precedence)
     app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
 
     @app.get("/{full_path:path}")

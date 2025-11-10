@@ -5,7 +5,6 @@ import base64
 import json
 import logging
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from google.cloud import firestore
@@ -13,6 +12,7 @@ from pydantic import BaseModel
 
 from ..config import settings
 from ..models import ScanReadyMessage
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +51,16 @@ async def process_video_analysis(
 
     try:
         # Process video analysis with configs (with timeout protection)
-        # Cloud Run timeout is 600s, set analysis timeout to 540s (9 minutes) to allow cleanup
+        # Cloud Run timeout is 1200s, set analysis timeout to 1080s (18 minutes) to allow cleanup
         try:
             result = await asyncio.wait_for(
                 video_analyzer.analyze_video(
                     video_metadata=scan_message.metadata, configs=configs, queue_size=1
                 ),
-                timeout=540  # 9 minutes - leaves 1 minute for cleanup before Cloud Run kills us
+                timeout=1080  # 18 minutes - leaves 2 minutes for cleanup before Cloud Run kills us
             )
-        except asyncio.TimeoutError:
-            logger.error(f"Video analysis timed out after 540 seconds for video {video_id}")
+        except TimeoutError:
+            logger.error(f"Video analysis timed out after 1080 seconds for video {video_id}")
 
             # Mark video as failed due to timeout
             try:
@@ -80,7 +80,7 @@ async def process_video_analysis(
                 firestore_client.collection("scan_history").document(scan_id).update({
                     "status": "failed",
                     "completed_at": firestore.SERVER_TIMESTAMP,
-                    "error_message": "Analysis timeout (540s)",
+                    "error_message": "Analysis timeout (1080s)",
                 })
             except Exception as e:
                 logger.error(f"Failed to update scan history after timeout: {e}")
@@ -109,10 +109,10 @@ async def process_video_analysis(
             })
             logger.info(f"Updated scan history {scan_id} to completed")
         except Exception as e:
-            logger.error(f"Failed to update scan history: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to update scan history", e, severity="ERROR")
 
     except Exception as e:
-        logger.error(f"Background task failed for video {video_id}: {e}", exc_info=True)
+        log_exception_json(logger, f"Background task failed for video {video_id}", e, severity="ERROR")
 
         # Update scan history to failed
         try:
@@ -121,8 +121,8 @@ async def process_video_analysis(
                 "completed_at": firestore.SERVER_TIMESTAMP,
                 "error_message": str(e),
             })
-        except:
-            pass
+        except Exception as e:
+            log_exception_json(logger, "Failed to update scan history after background task failure", e, severity="WARNING", scan_id=scan_id)
 
         # Update video status to failed
         try:
@@ -356,7 +356,7 @@ async def analyze_video(request: Request, background_tasks: BackgroundTasks):
         }
 
     except Exception as e:
-        logger.error(f"Failed to process message: {e}", exc_info=True)
+        log_exception_json(logger, "Failed to process message", e, severity="ERROR")
 
         # Update scan history to failed (only if scan_id was created)
         if scan_id and firestore_client:
@@ -367,8 +367,8 @@ async def analyze_video(request: Request, background_tasks: BackgroundTasks):
                     "error_message": str(e),
                 })
                 logger.info(f"Updated scan history {scan_id} to failed")
-            except:
-                pass
+            except Exception as update_error:
+                log_exception_json(logger, "Failed to update scan history after message processing failure", update_error, severity="WARNING", scan_id=scan_id)
 
         # Update video status to failed with error details
         if video_id and firestore_client:

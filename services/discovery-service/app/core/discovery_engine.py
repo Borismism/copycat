@@ -15,7 +15,8 @@ YES:
 """
 
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import datetime, UTC
 
 from ..models import DiscoveryStats
 from .quota_manager import QuotaManager
@@ -23,6 +24,7 @@ from .search_randomizer import SearchRandomizer, SearchOrder
 from .video_processor import VideoProcessor
 from .youtube_client import YouTubeClient
 from .search_history import SearchHistory
+from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +83,7 @@ class DiscoveryEngine:
         Returns:
             Discovery statistics
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         today = start_time.strftime("%Y-%m-%d")
         logger.info(f"=== SMART DISCOVERY (quota={max_quota}) ===")
 
@@ -113,7 +115,7 @@ class DiscoveryEngine:
             })
 
         # NEW STRATEGY: All-time searches, no time window filtering
-        logger.info(f"🌍 Using ALL-TIME search (no date filters)")
+        logger.info("🌍 Using ALL-TIME search (no date filters)")
         # Remove published_after override logic - we want all-time searches
 
         # Execute searches (group by keyword to avoid duplicates)
@@ -180,7 +182,7 @@ class DiscoveryEngine:
                 break
 
             if not self.quota.can_afford("search", 1):
-                logger.info(f"Global quota exhausted")
+                logger.info("Global quota exhausted")
                 break
 
             try:
@@ -323,7 +325,7 @@ class DiscoveryEngine:
                 # self._save_keyword_search(params.query, today, new_count, rediscovered_count, skipped_count)
 
             except Exception as e:
-                logger.error(f"Query '{params.query}' order={params.order.value} failed: {e}", exc_info=True)
+                log_exception_json(logger, f"Query '{params.query}' order={params.order.value} failed", e, severity="ERROR", keyword=params.query, order=params.order.value)
                 queries_processed.add(query_key)  # Mark as processed to avoid retry
                 continue
 
@@ -354,7 +356,7 @@ class DiscoveryEngine:
         unique_channels = len(unique_channel_ids)
 
         # Calculate stats
-        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+        duration = (datetime.now(UTC) - start_time).total_seconds()
         efficiency = videos_discovered / quota_used if quota_used > 0 else 0
 
         stats = DiscoveryStats(
@@ -364,7 +366,7 @@ class DiscoveryEngine:
             quota_used=quota_used,
             channels_tracked=unique_channels,  # Count unique channels from discovered videos
             duration_seconds=duration,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         logger.info(
@@ -382,9 +384,10 @@ class DiscoveryEngine:
 
         self._save_metrics(stats)
 
-        # Trigger batch vision analysis for top 500 unscanned videos
+        # Trigger batch vision analysis for top N unscanned videos (configurable via env)
         try:
-            await self._trigger_batch_vision_analysis(limit=500)
+            max_videos = int(os.getenv("MAX_VIDEOS_TO_SCAN", "500"))
+            await self._trigger_batch_vision_analysis(limit=max_videos)
         except Exception as e:
             logger.error(f"Failed to trigger batch vision analysis: {e}")
             # Don't fail discovery if vision trigger fails
@@ -439,7 +442,7 @@ class DiscoveryEngine:
                     if matched_ips:
                         logger.debug(f"      ✅ IP match: {matched_ips}")
                     else:
-                        logger.debug(f"      ℹ️  No IP match (saving anyway)")
+                        logger.debug("      ℹ️  No IP match (saving anyway)")
 
                     # Calculate initial risk
                     metadata.initial_risk = self.processor.calculate_initial_risk(
@@ -480,13 +483,13 @@ class DiscoveryEngine:
                     # If video was already scanned, reset scan status so it gets rescanned!
                     update_data = {
                         "matched_ips": updated_ips,
-                        "updated_at": datetime.now(timezone.utc),
+                        "updated_at": datetime.now(UTC),
                     }
 
                     if vision_scan_status == "scanned":
                         # Reset scan status - new config needs vision analysis!
                         update_data["vision_scan_status"] = None
-                        logger.info(f"      🔄 RESETTING scan status - will be rescanned with new IPs!")
+                        logger.info("      🔄 RESETTING scan status - will be rescanned with new IPs!")
 
                     doc_ref.update(update_data)
 
@@ -513,7 +516,7 @@ class DiscoveryEngine:
                 updated_at = old_data.get("updated_at")
                 if isinstance(updated_at, datetime):
                     time_elapsed_hours = (
-                        datetime.now(timezone.utc) - updated_at
+                        datetime.now(UTC) - updated_at
                     ).total_seconds() / 3600
                 else:
                     time_elapsed_hours = 24  # Default to 24h if missing
@@ -531,8 +534,8 @@ class DiscoveryEngine:
                     "like_count": metadata.like_count,
                     "comment_count": metadata.comment_count,
                     "view_velocity": view_velocity,
-                    "updated_at": datetime.now(timezone.utc),
-                    "last_seen_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(UTC),
+                    "last_seen_at": datetime.now(UTC),
                 })
 
                 # Check if trending (significant view increase)
@@ -560,7 +563,7 @@ class DiscoveryEngine:
                     )
 
             except Exception as e:
-                logger.error(f"Error processing video: {e}", exc_info=True)
+                log_exception_json(logger, "Error processing video", e, severity="ERROR")
                 continue
 
         return new_count, rediscovered_count, skipped_count, channel_ids
@@ -622,7 +625,7 @@ class DiscoveryEngine:
                     last_timestamps[keyword] = searched_at
                     logger.info(
                         f"  🕒 '{keyword}': Last searched {searched_at.strftime('%Y-%m-%d %H:%M')} "
-                        f"({(datetime.now(timezone.utc) - searched_at).days}d ago)"
+                        f"({(datetime.now(UTC) - searched_at).days}d ago)"
                     )
 
             # Log keywords that were never searched
@@ -633,7 +636,7 @@ class DiscoveryEngine:
             return last_timestamps
 
         except Exception as e:
-            logger.error(f"Failed to get last search timestamps: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to get last search timestamps", e, severity="ERROR")
             return {}
 
     def _get_keywords_searched_today(self, today: str) -> tuple[set[str], dict[str, int]]:
@@ -646,7 +649,6 @@ class DiscoveryEngine:
             - cooldown_info: dict mapping keyword → days_until_ready (for cycling)
         """
         try:
-            from datetime import timedelta
 
             # Get all keyword searches, find latest per keyword
             all_searches = (
@@ -673,7 +675,7 @@ class DiscoveryEngine:
                 cooldown_days = data.get("cooldown_days", 1)
 
                 if searched_at:
-                    days_since = (datetime.now(timezone.utc) - searched_at).days
+                    days_since = (datetime.now(UTC) - searched_at).days
                     days_until_ready = max(0, cooldown_days - days_since)
 
                     if days_since < cooldown_days:
@@ -716,7 +718,7 @@ class DiscoveryEngine:
             self.processor.firestore.collection("keyword_searches").add({
                 "keyword": keyword,
                 "search_date": search_date,
-                "searched_at": datetime.now(timezone.utc),
+                "searched_at": datetime.now(UTC),
                 "new_videos": new_videos,
                 "rediscovered_videos": rediscovered,
                 "skipped_videos": skipped,
@@ -789,8 +791,8 @@ class DiscoveryEngine:
                         "risk_score": video_data.get("risk_score", 50.0),
                         "risk_tier": video_data.get("risk_tier", "MEDIUM"),
                         "matched_ips": video_data.get("matched_ips", []),
-                        "discovered_at": video_data.get("discovered_at").isoformat() if video_data.get("discovered_at") else datetime.now(timezone.utc).isoformat(),
-                        "last_risk_update": video_data.get("discovered_at").isoformat() if video_data.get("discovered_at") else datetime.now(timezone.utc).isoformat(),
+                        "discovered_at": video_data.get("discovered_at").isoformat() if video_data.get("discovered_at") else datetime.now(UTC).isoformat(),
+                        "last_risk_update": video_data.get("discovered_at").isoformat() if video_data.get("discovered_at") else datetime.now(UTC).isoformat(),
                         "scan_priority": video_data.get("scan_priority", 50),
                     }
                 }
@@ -808,7 +810,7 @@ class DiscoveryEngine:
             logger.info(f"✅ Batch vision trigger complete: published {published_count} videos to scan-ready topic")
 
         except Exception as e:
-            logger.error(f"Failed to trigger batch vision analysis: {e}", exc_info=True)
+            log_exception_json(logger, "Failed to trigger batch vision analysis", e, severity="ERROR")
             raise
 
     def _save_channel_scan(self, channel_id: str):
@@ -820,7 +822,7 @@ class DiscoveryEngine:
             doc_ref = self.processor.firestore.collection("channel_scans").document(channel_id)
             doc_ref.set({
                 "channel_id": channel_id,
-                "last_scanned_at": datetime.now(timezone.utc),
+                "last_scanned_at": datetime.now(UTC),
                 "scan_count": Increment(1),  # Increment scan count
             }, merge=True)
             logger.debug(f"📺 Saved channel scan: {channel_id}")

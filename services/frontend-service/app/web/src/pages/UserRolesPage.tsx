@@ -240,7 +240,7 @@ function EditRoleModal({ identifier, assignment, onClose, onUpdated }: EditRoleM
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
         <h3 className="text-xl font-bold text-gray-900 mb-4">Edit Role Assignment</h3>
 
@@ -352,7 +352,7 @@ function CreateRoleModal({ onClose, onCreated }: CreateRoleModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
         <h3 className="text-xl font-bold text-gray-900 mb-4">Add Role Assignment</h3>
 

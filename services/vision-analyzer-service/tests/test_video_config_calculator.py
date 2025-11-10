@@ -1,7 +1,7 @@
 """Tests for video_config_calculator.py"""
 
 import pytest
-from app.core.video_config_calculator import VideoConfigCalculator, VideoConfig
+from app.core.video_config_calculator import VideoConfigCalculator
 
 
 class TestVideoConfigCalculator:

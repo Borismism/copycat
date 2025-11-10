@@ -1,14 +1,17 @@
 """Video library endpoints."""
 
-import json
 import asyncio
-from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query
+import json
+from datetime import UTC
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app.core.firestore_client import firestore_client
+from app.core.auth import get_current_user
 from app.core.config import settings
-from app.models import VideoListResponse, VideoMetadata, VideoStatus
+from app.core.firestore_client import firestore_client
+from app.models import UserInfo, UserRole, VideoListResponse, VideoMetadata, VideoStatus
+from app.utils.logging_utils import log_exception_json
 
 router = APIRouter()
 
@@ -69,7 +72,7 @@ async def list_videos(
             has_more=(offset + len(videos)) < total,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list videos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list videos: {e!s}")
 
 
 @router.get("/processing/list")
@@ -81,7 +84,6 @@ async def list_processing_videos():
     Useful for showing progress indicators and allowing users to reopen progress modals.
     """
     import logging
-    from google.cloud import firestore as gcp_firestore
 
     logger = logging.getLogger(__name__)
 
@@ -109,8 +111,8 @@ async def list_processing_videos():
             "count": len(videos)
         }
     except Exception as e:
-        logger.error(f"Failed to list processing videos: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to list processing videos: {str(e)}")
+        log_exception_json(logger, "Failed to list processing videos", e, severity="ERROR")
+        raise HTTPException(status_code=500, detail=f"Failed to list processing videos: {e!s}")
 
 
 @router.get("/{video_id}", response_model=VideoMetadata)
@@ -124,15 +126,20 @@ async def get_video(video_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get video: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get video: {e!s}")
 
 
 @router.post("/{video_id}/scan")
-async def scan_video(video_id: str):
+async def scan_video(
+    video_id: str,
+    user: UserInfo = Depends(get_current_user)
+):
     """
     Manually trigger vision analysis for a video.
 
     Publishes the video to the scan-ready PubSub topic for immediate analysis.
+
+    Requires: EDITOR or ADMIN role
 
     Args:
         video_id: Video ID to scan
@@ -140,7 +147,12 @@ async def scan_video(video_id: str):
     Returns:
         Success message
     """
-    from datetime import datetime, timezone
+    # Check permissions - only EDITOR, LEGAL, and ADMIN can trigger scans
+    if user.role not in [UserRole.EDITOR, UserRole.LEGAL, UserRole.ADMIN]:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Insufficient permissions. Role '{user.role.value}' cannot trigger scans. Required: editor, legal, or admin."
+        )
 
     try:
         # Get video metadata
@@ -187,7 +199,7 @@ async def scan_video(video_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to trigger scan: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger scan: {e!s}")
 
 
 @router.get("/{video_id}/scan/stream")
@@ -237,12 +249,12 @@ async def scan_video_stream(video_id: str):
                 # Calculate real elapsed time from when processing started
                 real_elapsed = elapsed
                 if video.status == "processing" and hasattr(video, 'processing_started_at') and video.processing_started_at:
-                    from datetime import datetime, timezone
-                    now = datetime.now(timezone.utc)
+                    from datetime import datetime
+                    now = datetime.now(UTC)
                     start_time = video.processing_started_at
                     # Ensure start_time is timezone-aware
                     if start_time.tzinfo is None:
-                        start_time = start_time.replace(tzinfo=timezone.utc)
+                        start_time = start_time.replace(tzinfo=UTC)
                     real_elapsed = int((now - start_time).total_seconds())
 
                 # Only send update if status changed or every 10 seconds

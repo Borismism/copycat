@@ -1,24 +1,23 @@
 """Vision Analyzer budget tracking endpoint - fetches real Vertex AI usage from GCP."""
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
 import os
+from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from google.api_core import exceptions as google_exceptions
-from app.core.firestore_client import firestore_client
-from app.core.config import settings
-from app.core.auth import get_current_user, require_role
-from app.models import UserInfo, UserRole
 import httpx
+from fastapi import APIRouter, Depends, HTTPException
 from google.cloud import firestore
+from pydantic import BaseModel
+
+from app.core.auth import get_current_user, require_role
+from app.core.config import settings
+from app.core.firestore_client import firestore_client
+from app.models import UserInfo, UserRole
 
 router = APIRouter()
 
 # Cache to prevent excessive GCP API calls
-_budget_cache: Optional[dict] = None
-_cache_timestamp: Optional[datetime] = None
+_budget_cache: dict | None = None
+_cache_timestamp: datetime | None = None
 CACHE_TTL_SECONDS = 300  # 5 minutes cache
 
 
@@ -109,7 +108,7 @@ def get_vertex_ai_usage(project_id: str = "copycat-429012") -> dict:
     global _budget_cache, _cache_timestamp
 
     # Check cache
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if _budget_cache and _cache_timestamp:
         cache_age = (now - _cache_timestamp).total_seconds()
         if cache_age < CACHE_TTL_SECONDS:
@@ -118,7 +117,7 @@ def get_vertex_ai_usage(project_id: str = "copycat-429012") -> dict:
 
     try:
         # Query Firestore for videos analyzed in last 24 hours
-        start_time = now - timedelta(hours=24)
+        now - timedelta(hours=24)
 
         # Count videos with vision_analysis (these were scanned by Gemini)
         videos_query = firestore_client.videos_collection.where(
@@ -199,11 +198,11 @@ def get_vertex_ai_usage(project_id: str = "copycat-429012") -> dict:
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch Vision AI usage from Firestore: {str(e)}"
+            detail=f"Failed to fetch Vision AI usage from Firestore: {e!s}"
         )
 
 
-def get_config_from_firestore() -> Optional[dict]:
+def get_config_from_firestore() -> dict | None:
     """Load Gemini configuration from Firestore."""
     try:
         doc_ref = firestore_client.db.collection("system_config").document("gemini")
@@ -295,7 +294,7 @@ async def get_vision_budget_stats():
     try:
         # Get budget configuration from budget_tracking collection
         # The vision-analyzer-service stores the actual configured budget there
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
 
         # Try to get from budget_tracking first (newer collection)
         budget_tracking_doc = firestore_client.db.collection("budget_tracking").document(today).get()
@@ -315,7 +314,7 @@ async def get_vision_budget_stats():
             avg_processing_time = tracking_data.get("avg_processing_time_seconds", 1.2)
             processing_rate = tracking_data.get("processing_rate_per_hour", 0.0)
             cache_age = 0
-            last_updated_val = tracking_data.get("last_updated", datetime.now(timezone.utc))
+            last_updated_val = tracking_data.get("last_updated", datetime.now(UTC))
             # Convert Firestore DatetimeWithNanoseconds to ISO string
             last_updated = last_updated_val.isoformat() if hasattr(last_updated_val, 'isoformat') else str(last_updated_val)
         else:
@@ -329,7 +328,7 @@ async def get_vision_budget_stats():
             avg_processing_time = 1.2
             processing_rate = 0.0
             cache_age = 0
-            last_updated = datetime.now(timezone.utc).isoformat()
+            last_updated = datetime.now(UTC).isoformat()
 
         budget_remaining_eur = max(0, daily_budget_eur - budget_used_eur)
         utilization = (budget_used_eur / daily_budget_eur) * 100 if daily_budget_eur > 0 else 0
@@ -356,7 +355,7 @@ async def get_vision_budget_stats():
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get budget statistics: {str(e)}"
+            detail=f"Failed to get budget statistics: {e!s}"
         )
 
 
@@ -375,7 +374,7 @@ async def get_vision_analytics():
     """
     try:
         # Get current time
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start_24h = now - timedelta(hours=24)
 
         # SUPER OPTIMIZED: Use COUNT aggregations instead of streaming all docs
@@ -413,11 +412,21 @@ async def get_vision_analytics():
         result = agg_query.get()
         total_errors = result[0][0].value if result else 0
 
-        query = firestore_client.videos_collection.where(filter=firestore.FieldFilter("status", "==", "pending"))
-        agg_query = AggregationQuery(query)
+        # Count pending videos (includes both "pending" and "discovered" status)
+        query_pending = firestore_client.videos_collection.where(filter=firestore.FieldFilter("status", "==", "pending"))
+        agg_query = AggregationQuery(query_pending)
         agg_query.count(alias="total")
         result = agg_query.get()
-        videos_pending = result[0][0].value if result else 0
+        pending_count = result[0][0].value if result else 0
+
+        # Also count discovered videos (not yet in scan queue)
+        query_discovered = firestore_client.videos_collection.where(filter=firestore.FieldFilter("status", "==", "discovered"))
+        agg_query = AggregationQuery(query_discovered)
+        agg_query.count(alias="total")
+        result = agg_query.get()
+        discovered_count = result[0][0].value if result else 0
+
+        videos_pending = pending_count + discovered_count
 
         query = firestore_client.videos_collection.where(filter=firestore.FieldFilter("status", "==", "processing"))
         agg_query = AggregationQuery(query)
@@ -498,7 +507,7 @@ async def get_vision_analytics():
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get analytics: {str(e)}"
+            detail=f"Failed to get analytics: {e!s}"
         )
 
 
@@ -559,10 +568,10 @@ async def start_batch_scan(request: BatchScanRequest, user: UserInfo = Depends(g
     except httpx.RequestError as e:
         raise HTTPException(
             status_code=503,
-            detail=f"Failed to connect to vision analyzer service: {str(e)}"
+            detail=f"Failed to connect to vision analyzer service: {e!s}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Batch scan failed: {str(e)}"
+            detail=f"Batch scan failed: {e!s}"
         )

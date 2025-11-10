@@ -12,6 +12,8 @@ from fastapi import APIRouter, HTTPException
 from google.cloud import firestore
 from pydantic import BaseModel
 
+from app.utils.logging_utils import log_exception_json
+
 router = APIRouter(prefix="/config", tags=["configuration"])
 logger = logging.getLogger(__name__)
 
@@ -186,10 +188,10 @@ async def list_ip_configs() -> dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Failed to list IP configs: {e}")
+        log_exception_json(logger, "Failed to list IP configs", e, severity="ERROR")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list IP configurations: {str(e)}"
+            detail=f"Failed to list IP configurations: {e!s}"
         )
 
 
@@ -211,7 +213,7 @@ async def update_characters(config_id: str, request: UpdateFieldRequest) -> dict
         logger.info(f"Updated characters for {config_id}: {len(request.values)} items")
         return {"success": True, "count": len(request.values)}
     except Exception as e:
-        logger.error(f"Failed to update characters: {e}")
+        log_exception_json(logger, "Failed to update characters", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -227,7 +229,7 @@ async def update_keywords(config_id: str, request: UpdateFieldRequest) -> dict[s
         logger.info(f"Updated keywords for {config_id}: {len(request.values)} items")
         return {"success": True, "count": len(request.values)}
     except Exception as e:
-        logger.error(f"Failed to update keywords: {e}")
+        log_exception_json(logger, "Failed to update keywords", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -261,7 +263,7 @@ async def update_high_priority_keywords(config_id: str, request: UpdateFieldRequ
         logger.info(f"Updated high priority keywords for {config_id}: {len(high_priority)} items, total search_keywords: {len(search_keywords)}")
         return {"success": True, "count": len(high_priority), "total_keywords": len(search_keywords)}
     except Exception as e:
-        logger.error(f"Failed to update high priority keywords: {e}")
+        log_exception_json(logger, "Failed to update high priority keywords", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -295,7 +297,7 @@ async def update_medium_priority_keywords(config_id: str, request: UpdateFieldRe
         logger.info(f"Updated medium priority keywords for {config_id}: {len(medium_priority)} items, total search_keywords: {len(search_keywords)}")
         return {"success": True, "count": len(medium_priority), "total_keywords": len(search_keywords)}
     except Exception as e:
-        logger.error(f"Failed to update medium priority keywords: {e}")
+        log_exception_json(logger, "Failed to update medium priority keywords", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -329,7 +331,7 @@ async def update_low_priority_keywords(config_id: str, request: UpdateFieldReque
         logger.info(f"Updated low priority keywords for {config_id}: {len(low_priority)} items, total search_keywords: {len(search_keywords)}")
         return {"success": True, "count": len(low_priority), "total_keywords": len(search_keywords)}
     except Exception as e:
-        logger.error(f"Failed to update low priority keywords: {e}")
+        log_exception_json(logger, "Failed to update low priority keywords", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -345,7 +347,7 @@ async def update_ai_patterns(config_id: str, request: UpdateFieldRequest) -> dic
         logger.info(f"Updated AI patterns for {config_id}: {len(request.values)} items")
         return {"success": True, "count": len(request.values)}
     except Exception as e:
-        logger.error(f"Failed to update AI patterns: {e}")
+        log_exception_json(logger, "Failed to update AI patterns", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -361,7 +363,7 @@ async def update_visual_keywords(config_id: str, request: UpdateFieldRequest) ->
         logger.info(f"Updated visual keywords for {config_id}: {len(request.values)} items")
         return {"success": True, "count": len(request.values)}
     except Exception as e:
-        logger.error(f"Failed to update visual keywords: {e}")
+        log_exception_json(logger, "Failed to update visual keywords", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -377,7 +379,7 @@ async def update_video_titles(config_id: str, request: UpdateFieldRequest) -> di
         logger.info(f"Updated video titles for {config_id}: {len(request.values)} items")
         return {"success": True, "count": len(request.values)}
     except Exception as e:
-        logger.error(f"Failed to update video titles: {e}")
+        log_exception_json(logger, "Failed to update video titles", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -393,7 +395,7 @@ async def update_false_positive_filters(config_id: str, request: UpdateFieldRequ
         logger.info(f"Updated false positive filters for {config_id}: {len(request.values)} items")
         return {"success": True, "count": len(request.values)}
     except Exception as e:
-        logger.error(f"Failed to update false positive filters: {e}")
+        log_exception_json(logger, "Failed to update false positive filters", e, severity="ERROR", config_id=config_id)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -455,10 +457,10 @@ async def delete_config(config_id: str) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to delete config {config_id}: {e}")
+        log_exception_json(logger, "Failed to delete config", e, severity="ERROR", config_id=config_id)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete IP configuration: {str(e)}"
+            detail=f"Failed to delete IP configuration: {e!s}"
         )
 
 
@@ -498,8 +500,8 @@ async def list_deleted_configs() -> dict[str, Any]:
             try:
                 videos_ref = db.collection("videos").where("matched_ips", "array_contains", doc.id).where("deleted", "==", True)
                 video_count = len(list(videos_ref.stream()))
-            except:
-                pass
+            except Exception as e:
+                log_exception_json(logger, "Failed to count deleted videos for config", e, severity="WARNING", config_id=doc.id)
 
             configs.append({
                 "id": doc.id,
@@ -518,10 +520,10 @@ async def list_deleted_configs() -> dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Failed to list deleted IP configs: {e}")
+        log_exception_json(logger, "Failed to list deleted IP configs", e, severity="ERROR")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list deleted IP configurations: {str(e)}"
+            detail=f"Failed to list deleted IP configurations: {e!s}"
         )
 
 
@@ -592,8 +594,8 @@ async def restore_config(config_id: str) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to restore config {config_id}: {e}")
+        log_exception_json(logger, "Failed to restore config", e, severity="ERROR", config_id=config_id)
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to restore IP configuration: {str(e)}"
+            detail=f"Failed to restore IP configuration: {e!s}"
         )

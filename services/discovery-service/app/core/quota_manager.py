@@ -1,7 +1,7 @@
 """YouTube API quota management and optimization."""
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from google.cloud import firestore
@@ -93,7 +93,7 @@ class QuotaManager:
         Returns:
             Date string in YYYY-MM-DD format (UTC)
         """
-        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return datetime.now(UTC).strftime("%Y-%m-%d")
 
     def _load_today_usage(self) -> int:
         """
@@ -164,7 +164,7 @@ class QuotaManager:
             project_name = f"projects/{self.project_id}"
 
             # Query for YouTube API quota usage in the last 24 hours
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
             interval = monitoring_v3.TimeInterval({
@@ -236,7 +236,7 @@ class QuotaManager:
         try:
             doc_ref.set({
                 "units_used": actual_usage,
-                "last_updated": datetime.now(timezone.utc),
+                "last_updated": datetime.now(UTC),
                 "source": "google_monitoring_api",
             }, merge=True)
             logger.debug(f"Saved actual usage to Firestore: {actual_usage} units")
@@ -306,7 +306,7 @@ class QuotaManager:
                     "date": today_key,
                     "units_used": self.used_quota,
                     "daily_quota": self.daily_quota,
-                    "updated_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(UTC),
                 },
                 merge=True,
             )
@@ -385,7 +385,7 @@ class QuotaManager:
             return 0
 
         # Calculate hours until UTC midnight (quota reset)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         midnight_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
         time_until_reset = midnight_today - now
         hours_remaining = max(1, time_until_reset.total_seconds() / 3600)  # At least 1 hour

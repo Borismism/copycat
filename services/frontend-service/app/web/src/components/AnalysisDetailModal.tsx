@@ -1,6 +1,8 @@
 import { Fragment, useState } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
+import { useNavigate } from 'react-router-dom'
 import type { VisionAnalysis } from '../types'
+import { usePermissions } from '../hooks/usePermissions'
 
 interface AnalysisDetailModalProps {
   isOpen: boolean
@@ -8,6 +10,8 @@ interface AnalysisDetailModalProps {
   analysis: VisionAnalysis
   videoTitle: string
   videoId: string
+  channelId?: string
+  channelTitle?: string
 }
 
 export default function AnalysisDetailModal({
@@ -16,9 +20,13 @@ export default function AnalysisDetailModal({
   analysis,
   videoTitle,
   videoId,
+  channelId,
+  channelTitle,
 }: AnalysisDetailModalProps) {
   const [isRescanning, setIsRescanning] = useState(false)
   const [rescanSuccess, setRescanSuccess] = useState(false)
+  const { canStartScans } = usePermissions()
+  const navigate = useNavigate()
 
   const handleRescan = async () => {
     setIsRescanning(true)
@@ -51,6 +59,8 @@ export default function AnalysisDetailModal({
     switch (action) {
       case 'immediate_takedown':
         return 'bg-red-100 text-red-800'
+      case 'tolerated':
+        return 'bg-orange-100 text-orange-800'
       case 'monitor':
         return 'bg-yellow-100 text-yellow-800'
       case 'safe_harbor':
@@ -73,7 +83,7 @@ export default function AnalysisDetailModal({
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-black bg-opacity-40" />
+          <div className="fixed inset-0 bg-black/40" />
         </Transition.Child>
 
         <div className="fixed inset-0 overflow-y-auto">
@@ -292,30 +302,49 @@ export default function AnalysisDetailModal({
                 {/* Footer */}
                 <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
                   <div className="flex items-center gap-3">
-                    <button
-                      onClick={handleRescan}
-                      disabled={isRescanning || rescanSuccess}
-                      className={`px-4 py-2 rounded-lg transition-colors font-medium flex items-center gap-2 ${
-                        rescanSuccess
-                          ? 'bg-green-600 text-white'
-                          : 'bg-orange-600 text-white hover:bg-orange-700'
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      {isRescanning && (
-                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    {channelId && (
+                      <button
+                        onClick={() => {
+                          navigate(`/videos?channel=${channelId}`)
+                          onClose()
+                        }}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium flex items-center gap-2"
+                        title={`Filter videos from: ${channelTitle || 'this channel'}`}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
                         </svg>
-                      )}
-                      {rescanSuccess && (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                      {rescanSuccess ? 'Scan Queued!' : isRescanning ? 'Starting...' : 'Rescan Video'}
-                    </button>
-                    {rescanSuccess && (
-                      <span className="text-sm text-green-700">Watch Active Scans for progress</span>
+                        Filter This Channel
+                      </button>
+                    )}
+                    {canStartScans && (
+                      <>
+                        <button
+                          onClick={handleRescan}
+                          disabled={isRescanning || rescanSuccess}
+                          className={`px-4 py-2 rounded-lg transition-colors font-medium flex items-center gap-2 ${
+                            rescanSuccess
+                              ? 'bg-green-600 text-white'
+                              : 'bg-orange-600 text-white hover:bg-orange-700'
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                          {isRescanning && (
+                            <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                          )}
+                          {rescanSuccess && (
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                          {rescanSuccess ? 'Scan Queued!' : isRescanning ? 'Starting...' : 'Rescan Video'}
+                        </button>
+                        {rescanSuccess && (
+                          <span className="text-sm text-green-700">Watch Active Scans for progress</span>
+                        )}
+                      </>
                     )}
                   </div>
                   <button

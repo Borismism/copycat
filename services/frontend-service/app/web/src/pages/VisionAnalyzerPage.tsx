@@ -790,12 +790,14 @@ export default function VisionAnalyzerPage() {
           analysis={selectedScan.video.vision_analysis}
           videoId={selectedScan.scan.video_id}
           videoTitle={selectedScan.scan.video_title}
+          channelId={selectedScan.scan.channel_id}
+          channelTitle={selectedScan.scan.channel_title}
         />
       )}
 
       {/* Confirm Dialog */}
       {showConfirmDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowConfirmDialog(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowConfirmDialog(false)}>
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-gray-900 mb-2">Confirm Batch Scan</h3>
             <p className="text-gray-600 mb-6">

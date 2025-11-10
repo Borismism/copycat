@@ -1,7 +1,7 @@
 """Tests for new channel intelligence models."""
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from app.models import (
     ChannelProfile,
@@ -17,7 +17,7 @@ class TestChannelTier:
 
     def test_channel_tier_critical(self):
         """Test critical tier (80-100 risk score)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="test",
             channel_title="Test",
@@ -30,7 +30,7 @@ class TestChannelTier:
 
     def test_channel_tier_high(self):
         """Test high tier (60-79 risk score)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="test",
             channel_title="Test",
@@ -43,7 +43,7 @@ class TestChannelTier:
 
     def test_channel_tier_medium(self):
         """Test medium tier (40-59 risk score)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="test",
             channel_title="Test",
@@ -56,7 +56,7 @@ class TestChannelTier:
 
     def test_channel_tier_low(self):
         """Test low tier (20-39 risk score)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="test",
             channel_title="Test",
@@ -69,7 +69,7 @@ class TestChannelTier:
 
     def test_channel_tier_minimal(self):
         """Test minimal tier (0-19 risk score)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="test",
             channel_title="Test",
@@ -86,7 +86,7 @@ class TestChannelProfile:
 
     def test_channel_profile_creation(self):
         """Test creating a channel profile."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_test_123",
             channel_title="AI Content Creator",
@@ -108,7 +108,7 @@ class TestChannelProfile:
 
     def test_channel_profile_defaults(self):
         """Test channel profile with default values."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_minimal",
             channel_title="Minimal Channel",
@@ -127,7 +127,7 @@ class TestChannelProfile:
 
     def test_channel_profile_serialization(self):
         """Test channel profile can be serialized."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         profile = ChannelProfile(
             channel_id="UC_test",
             channel_title="Test",

@@ -111,7 +111,7 @@ export default function SystemHealthBanner({ services, lastUpdated }: SystemHeal
       </div>
 
       {overall.status !== 'healthy' && (
-        <div className="mt-6 p-4 bg-white bg-opacity-50 rounded-lg">
+        <div className="mt-6 p-4 bg-white/50 rounded-lg">
           <p className="text-sm font-medium">
             {services.filter(s => s.status !== 'healthy').map(s => (
               <span key={s.service_name} className="block">

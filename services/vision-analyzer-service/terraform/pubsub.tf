@@ -9,8 +9,16 @@ resource "google_pubsub_subscription" "scan_ready" {
 
   ack_deadline_seconds = 600 # 10 minutes for long video processing
 
+  # Limit concurrent video processing to control Gemini costs
+  # This controls how many videos are analyzed concurrently
+  enable_exactly_once_delivery = false
+
   push_config {
     push_endpoint = "${google_cloud_run_v2_service.vision_analyzer_service.uri}/analyze"
+
+    attributes = {
+      x-goog-version = "v1"
+    }
 
     oidc_token {
       service_account_email = google_service_account.push_sa.email

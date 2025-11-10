@@ -38,9 +38,9 @@ variable "min_instances" {
 }
 
 variable "max_instances" {
-  description = "Maximum number of instances"
+  description = "Maximum number of instances (DEPRECATED - use max_concurrent_videos)"
   type        = number
-  default     = 1000  # Support 1000 concurrent video analyses
+  default     = 1000
 }
 
 # Resource limits
@@ -60,7 +60,7 @@ variable "memory" {
 variable "timeout_seconds" {
   description = "Request timeout in seconds"
   type        = number
-  default     = 600
+  default     = 1200  # 20 minutes for heavy load scenarios
 }
 
 variable "concurrency" {
@@ -74,6 +74,12 @@ variable "daily_budget_eur" {
   description = "Daily Gemini API budget in EUR"
   type        = string
   default     = "260" # Production default: €260
+}
+
+variable "max_concurrent_videos" {
+  description = "Maximum number of videos to analyze concurrently (controls PubSub outstanding messages)"
+  type        = number
+  default     = 10 # Process 10 videos at a time to control costs
 }
 
 variable "state_bucket" {

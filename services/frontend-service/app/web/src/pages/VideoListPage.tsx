@@ -273,11 +273,17 @@ export default function VideoListPage() {
           let hasInfringement = false
           let confidence = 0
           let infringementCount = 0
+          let hasFairUse = false
+          let hasTolerated = false
 
           if (video.vision_analysis?.ip_results && video.vision_analysis.ip_results.length > 0) {
             // Check if any IP has infringement
             hasInfringement = video.vision_analysis.ip_results.some(ip => ip.contains_infringement)
             infringementCount = video.vision_analysis.ip_results.filter(ip => ip.contains_infringement).length
+            // Check if any IP has fair use
+            hasFairUse = video.vision_analysis.ip_results.some(ip => ip.fair_use_applies)
+            // Check if any IP has tolerated status
+            hasTolerated = video.vision_analysis.ip_results.some(ip => ip.recommended_action === 'tolerated')
             // Average infringement likelihood across all IPs
             const avgLikelihood = video.vision_analysis.ip_results.reduce((sum, ip) => sum + ip.infringement_likelihood, 0) / video.vision_analysis.ip_results.length
             confidence = Math.round(avgLikelihood)
@@ -285,6 +291,7 @@ export default function VideoListPage() {
 
           return (
           <div key={video.video_id} className={`bg-white rounded-lg shadow overflow-hidden hover:shadow-xl transition-shadow ${
+            video.status === 'analyzed' && (hasFairUse || hasTolerated) ? 'border-2 border-green-500' :
             video.status === 'analyzed' && hasInfringement ? 'border-2 border-red-500' :
             video.status === 'analyzed' && !hasInfringement ? 'border-2 border-green-500' : ''
           }`}>
@@ -303,7 +310,7 @@ export default function VideoListPage() {
                     className="w-full h-48 object-cover group-hover:opacity-90 transition-opacity"
                   />
                   {/* Play button overlay */}
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black bg-opacity-20">
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
                     <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center">
                       <svg className="w-8 h-8 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M8 5v14l11-7z"/>
@@ -318,26 +325,22 @@ export default function VideoListPage() {
               )}
             </a>
 
-            {/* Content */}
-            <div className="p-4 flex flex-col">
-              <a
-                href={`https://youtube.com/watch?v=${video.video_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block"
-              >
-                <h3 className="font-medium text-gray-900 hover:text-blue-600 line-clamp-2 text-sm mb-2 transition-colors h-10">
-                  {video.title}
-                </h3>
-              </a>
-              <a
-                href={`https://www.youtube.com/channel/${video.channel_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-gray-600 hover:text-blue-600 block mb-2 transition-colors"
-              >
+            {/* Content - Clickable to open modal */}
+            <div
+              className="p-4 flex flex-col cursor-pointer hover:bg-gray-50 transition-colors"
+              onClick={() => {
+                if (video.status === 'analyzed' && video.vision_analysis) {
+                  setSelectedAnalysis({ video, analysis: video.vision_analysis! })
+                  setAnalysisModalOpen(true)
+                }
+              }}
+            >
+              <h3 className="font-medium text-gray-900 line-clamp-2 text-sm mb-2 h-10">
+                {video.title}
+              </h3>
+              <p className="text-xs text-gray-600 block mb-2">
                 {video.channel_title}
-              </a>
+              </p>
 
               <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
                 <span>{video.view_count.toLocaleString()} views</span>
@@ -392,14 +395,14 @@ export default function VideoListPage() {
               {/* Infringement Summary (for analyzed videos) */}
               {video.status === 'analyzed' && video.vision_analysis?.ip_results && video.vision_analysis.ip_results.length > 0 && (
                 <div className="mt-2 p-2 rounded-lg border" style={{
-                  backgroundColor: hasInfringement ? '#fee2e2' : '#d1fae5',
-                  borderColor: hasInfringement ? '#ef4444' : '#10b981'
+                  backgroundColor: (hasFairUse || hasTolerated) ? '#d1fae5' : hasInfringement ? '#fee2e2' : '#d1fae5',
+                  borderColor: (hasFairUse || hasTolerated) ? '#10b981' : hasInfringement ? '#ef4444' : '#10b981'
                 }}>
                   <div className="flex items-center justify-between mb-1">
-                    <span className={`text-xs font-bold ${hasInfringement ? 'text-red-900' : 'text-green-900'}`}>
-                      {hasInfringement ? '⚠️ INFRINGEMENT DETECTED' : '✅ NO INFRINGEMENT'}
+                    <span className={`text-xs font-bold ${(hasFairUse || hasTolerated) ? 'text-green-900' : hasInfringement ? 'text-red-900' : 'text-green-900'}`}>
+                      {hasTolerated ? '✅ TOLERATED' : hasFairUse ? '✅ FAIR USE' : hasInfringement ? '⚠️ INFRINGEMENT DETECTED' : '✅ NO INFRINGEMENT'}
                     </span>
-                    <span className={`text-xs font-medium ${hasInfringement ? 'text-red-700' : 'text-green-700'}`}>
+                    <span className={`text-xs font-medium ${(hasFairUse || hasTolerated) ? 'text-green-700' : hasInfringement ? 'text-red-700' : 'text-green-700'}`}>
                       {confidence}% likelihood
                     </span>
                   </div>
@@ -416,13 +419,20 @@ export default function VideoListPage() {
                         <div key={idx} className="flex items-center gap-1">
                           <span
                             className={`px-1.5 py-0.5 rounded text-xs ${
-                              ipResult.contains_infringement
+                              ipResult.recommended_action === 'tolerated'
+                                ? 'bg-green-200 text-green-900'
+                                : ipResult.contains_infringement
                                 ? 'bg-red-200 text-red-900'
                                 : 'bg-green-200 text-green-900'
                             }`}
                           >
                             {ipResult.ip_name}
                           </span>
+                          {ipResult.recommended_action === 'tolerated' && (
+                            <span className="px-1.5 py-0.5 rounded text-xs bg-green-200 text-green-900">
+                              Tolerated
+                            </span>
+                          )}
                           {ipResult.fair_use_applies && (
                             <span className="px-1.5 py-0.5 rounded text-xs bg-blue-200 text-blue-900">
                               Fair Use
@@ -445,7 +455,10 @@ export default function VideoListPage() {
                 {/* View Progress Button (for processing videos) */}
                 {video.status === 'processing' && (
                   <button
-                    onClick={() => handleViewProgress(video.video_id)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleViewProgress(video.video_id)
+                    }}
                     className="flex items-center justify-center gap-2 w-full text-center px-3 py-2 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700 active:scale-95 transition-all"
                   >
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -459,7 +472,10 @@ export default function VideoListPage() {
                 {/* Scan Now / Retry Button (for discovered or failed videos) */}
                 {(video.status === 'discovered' || video.status === 'failed') && (
                   <button
-                    onClick={() => handleScanVideo(video)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleScanVideo(video)
+                    }}
                     disabled={scanningInProgress.has(video.video_id) || !canStartScans}
                     className={`flex items-center justify-center gap-2 w-full text-center px-3 py-2 text-white text-xs font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 ${
                       video.status === 'failed' ? 'bg-orange-600 hover:bg-orange-700' : 'bg-blue-600 hover:bg-blue-700'
@@ -488,40 +504,6 @@ export default function VideoListPage() {
                       : video.status === 'failed' ? 'Retry Scan' : 'Scan Now'}
                   </button>
                 )}
-
-                {/* View Analysis Details Button (only for analyzed videos) */}
-                {video.status === 'analyzed' && video.vision_analysis && (
-                  <button
-                    onClick={() => {
-                      setSelectedAnalysis({ video, analysis: video.vision_analysis! })
-                      setAnalysisModalOpen(true)
-                    }}
-                    className="flex items-center justify-center gap-2 w-full text-center px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 active:scale-95 transition-all"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                    View Analysis Details
-                  </button>
-                )}
-
-                {/* View on YouTube Button */}
-                <a
-                  href={`https://youtube.com/watch?v=${video.video_id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full text-center px-3 py-2 bg-red-600 text-white text-xs font-medium rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                  </svg>
-                  Watch on YouTube
-                </a>
               </div>
             </div>
           </div>
@@ -555,7 +537,7 @@ export default function VideoListPage() {
       {/* Backdrop overlay */}
       {filterPanelOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40"
+          className="fixed inset-0 bg-black/50 z-40"
           onClick={() => setFilterPanelOpen(false)}
         />
       )}
@@ -721,6 +703,8 @@ export default function VideoListPage() {
         analysis={selectedAnalysis.analysis}
         videoTitle={selectedAnalysis.video.title}
         videoId={selectedAnalysis.video.video_id}
+        channelId={selectedAnalysis.video.channel_id}
+        channelTitle={selectedAnalysis.video.channel_title}
       />
     )}
     </>
