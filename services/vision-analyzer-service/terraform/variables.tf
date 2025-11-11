@@ -13,6 +13,12 @@ variable "region" {
   default     = "europe-west4"
 }
 
+variable "scheduler_region" {
+  description = "GCP Region for Cloud Scheduler (must be different from Cloud Run)"
+  type        = string
+  default     = "europe-west1"
+}
+
 variable "gemini_location" {
   description = "GCP Region for Gemini/Vertex AI (us-central1 recommended)"
   type        = string
@@ -66,7 +72,7 @@ variable "timeout_seconds" {
 variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
-  default     = 1 # Process one video at a time
+  default     = 80 # High concurrency since we use background tasks (requests return immediately)
 }
 
 # Budget configuration
