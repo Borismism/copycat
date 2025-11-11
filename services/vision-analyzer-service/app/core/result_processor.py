@@ -120,10 +120,10 @@ class ResultProcessor:
             if not was_previously_analyzed:
                 # First-time scan: increment total_analyzed
                 update_data["total_analyzed"] = firestore.Increment(1)
-                logger.debug(f"System stats: +1 analyzed (first scan)")
+                logger.debug("System stats: +1 analyzed (first scan)")
             else:
                 # Re-scan: don't increment total_analyzed (already counted)
-                logger.debug(f"System stats: re-scan, no change to total_analyzed")
+                logger.debug("System stats: re-scan, no change to total_analyzed")
 
             # Handle total_infringements count with subtract old, add new logic
             if was_previously_analyzed and previous_had_infringement is not None:
@@ -131,17 +131,17 @@ class ResultProcessor:
                 if previous_had_infringement and not has_infringement:
                     # Was infringement, now cleared - decrement
                     update_data["total_infringements"] = firestore.Increment(-1)
-                    logger.debug(f"System stats: -1 infringement (reclassified to cleared)")
+                    logger.debug("System stats: -1 infringement (reclassified to cleared)")
                 elif not previous_had_infringement and has_infringement:
                     # Was cleared, now infringement - increment
                     update_data["total_infringements"] = firestore.Increment(1)
-                    logger.debug(f"System stats: +1 infringement (reclassified to infringement)")
+                    logger.debug("System stats: +1 infringement (reclassified to infringement)")
                 # else: same result, no change
             else:
                 # First-time scan
                 if has_infringement:
                     update_data["total_infringements"] = firestore.Increment(1)
-                    logger.debug(f"System stats: +1 infringement (first scan)")
+                    logger.debug("System stats: +1 infringement (first scan)")
 
             stats_ref.set(update_data, merge=True)
 

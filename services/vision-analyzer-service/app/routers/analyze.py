@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request
 from google.cloud import firestore
 from pydantic import BaseModel
 
@@ -43,17 +43,11 @@ async def process_video_analysis(
     firestore_client: firestore.Client,
 ):
     """
-    Background task to process video analysis (non-blocking).
+    Process video analysis (called by worker pool).
 
-    This runs in the background so it doesn't block health checks.
+    NOTE: Active processing count is managed by the worker, not here.
     """
-    import app.main as main_module
-
     video_id = scan_message.video_id
-
-    # Track active processing for graceful shutdown
-    main_module.active_processing_count += 1
-    logger.info(f"📹 Processing started: {video_id} (active: {main_module.active_processing_count})")
 
     try:
         # Process video analysis with configs (with timeout protection)
@@ -168,29 +162,22 @@ async def process_video_analysis(
             logger.error(f"Failed to update video status to failed: {update_error}")
 
     finally:
-        # CRITICAL: Always decrement active processing count
-        main_module.active_processing_count -= 1
-        logger.info(f"✅ Processing completed: {video_id} (active: {main_module.active_processing_count})")
-
-        # If shutdown was requested and no more active processing, exit now
-        if main_module.shutdown_requested and main_module.active_processing_count == 0:
-            logger.warning("⚠️  Shutdown complete - all processing finished, exiting now")
-            import sys
-            sys.exit(0)
+        # Worker manages active_processing_count, not this function
+        pass
 
 
 @router.post("/analyze")
-async def analyze_video(request: Request, background_tasks: BackgroundTasks):
+async def analyze_video(request: Request):
     """
     Receive PubSub push messages for video analysis.
 
     This endpoint is called by PubSub when a scan-ready message is published.
 
-    **CRITICAL: This endpoint returns immediately (200 OK) to avoid blocking health checks.**
-    Actual video analysis happens in a background task.
+    **CRITICAL: This endpoint adds video to queue and returns immediately (200 OK).**
+    Worker pool processes videos in parallel from the queue.
 
     Returns:
-        200 OK: Message accepted (processing in background)
+        200 OK: Message accepted (queued for processing)
         500 Error: Message should be retried
     """
     import app.main as main_module
@@ -382,28 +369,23 @@ async def analyze_video(request: Request, background_tasks: BackgroundTasks):
                 # Return 200 OK (don't retry - this is a data problem)
                 return {"status": "error", "video_id": video_id, "message": f"No configs for {matched_ips}"}
 
-        # Schedule video analysis in background (non-blocking!)
-        # This allows /health endpoint to respond immediately
-        background_tasks.add_task(
-            process_video_analysis,
-            scan_message=scan_message,
-            scan_id=scan_id,
-            configs=configs,
-            video_analyzer=video_analyzer,
-            firestore_client=firestore_client,
-        )
+        # Add video to analysis queue for worker pool
+        # This is INSTANT - no blocking, just adding to in-memory queue
+        await main_module.analysis_queue.put((scan_message, scan_id, configs))
 
+        queue_size = main_module.analysis_queue.qsize()
         logger.info(
-            f"✅ Accepted video {video_id} for analysis (processing in background, "
-            f"health checks will continue to work)"
+            f"✅ Queued video {video_id} for analysis "
+            f"(queue: {queue_size}, active: {main_module.active_processing_count})"
         )
 
-        # Return 200 OK immediately (analysis happening in background)
+        # Return 200 OK immediately (workers will process from queue)
         return {
-            "status": "accepted",
+            "status": "queued",
             "video_id": video_id,
             "scan_id": scan_id,
-            "message": "Video analysis started in background"
+            "queue_size": queue_size,
+            "message": "Video queued for parallel processing by worker pool"
         }
 
     except Exception as e:

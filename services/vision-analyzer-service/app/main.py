@@ -1,6 +1,9 @@
 """FastAPI application for vision-analyzer service."""
 
+import asyncio
 import logging
+import signal
+import sys
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -77,7 +80,6 @@ async def _cleanup_stuck_videos(firestore_client: firestore.Client):
     This handles cases where Cloud Run killed the instance (deployment, crash,
     autoscaling) before the background task could complete.
     """
-    from datetime import datetime, timezone
 
     try:
         logger.info("🔧 Checking for incomplete scans from previous instance...")
@@ -165,12 +167,13 @@ async def _cleanup_stuck_videos(firestore_client: firestore.Client):
         )
 
 
-import signal
-import sys
-
 # Track active processing to prevent premature shutdown
 active_processing_count = 0
 shutdown_requested = False
+
+# Global queue for video analysis requests (populated by /analyze endpoint)
+analysis_queue: asyncio.Queue = None
+worker_tasks: list[asyncio.Task] = []
 
 
 def signal_handler(signum, frame):
@@ -206,15 +209,97 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 
+async def video_analysis_worker(
+    worker_id: int,
+    video_analyzer,
+    firestore_client: firestore.Client,
+):
+    """
+    Worker task that continuously processes videos from the queue.
+
+    This enables TRUE parallel processing - multiple workers run concurrently,
+    each processing different videos at the same time.
+    """
+    global active_processing_count, shutdown_requested
+
+    logger.info(f"🔧 Worker {worker_id} started")
+
+    while not shutdown_requested:
+        try:
+            # Wait for video from queue (with timeout to check shutdown periodically)
+            try:
+                job = await asyncio.wait_for(analysis_queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                # No video available, loop back to check shutdown
+                continue
+
+            scan_message, scan_id, configs = job
+
+            video_id = scan_message.video_id
+            active_processing_count += 1
+
+            logger.info(
+                f"🎬 Worker {worker_id} processing {video_id} "
+                f"(active: {active_processing_count}, queue: {analysis_queue.qsize()})"
+            )
+
+            try:
+                # Import here to avoid circular dependency
+                from .routers.analyze import process_video_analysis
+
+                # Process the video (this is the actual work)
+                await process_video_analysis(
+                    scan_message=scan_message,
+                    scan_id=scan_id,
+                    configs=configs,
+                    video_analyzer=video_analyzer,
+                    firestore_client=firestore_client,
+                )
+
+            except Exception as e:
+                log_exception_json(
+                    logger,
+                    f"Worker {worker_id} failed to process video {video_id}",
+                    e,
+                    severity="ERROR",
+                    worker_id=worker_id,
+                    video_id=video_id
+                )
+
+            finally:
+                active_processing_count -= 1
+                analysis_queue.task_done()
+
+                logger.info(
+                    f"✅ Worker {worker_id} completed {video_id} "
+                    f"(active: {active_processing_count}, queue: {analysis_queue.qsize()})"
+                )
+
+        except Exception as e:
+            log_exception_json(
+                logger,
+                f"Worker {worker_id} encountered unexpected error",
+                e,
+                severity="ERROR",
+                worker_id=worker_id
+            )
+            await asyncio.sleep(1)  # Brief pause before retrying
+
+    logger.info(f"🛑 Worker {worker_id} shutting down")
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize service on startup."""
+    global analysis_queue, worker_tasks
+
     logger.info(f"Starting {settings.service_name} v{settings.version}")
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"GCP Project: {settings.gcp_project_id}")
     logger.info(f"Region: {settings.gcp_region}")
     logger.info(f"Gemini Model: {settings.gemini_model}")
     logger.info(f"Daily Budget: €{settings.daily_budget_eur}")
+    logger.info(f"Worker Pool Size: {settings.worker_pool_size}")
 
     # Initialize GCP clients
     logger.info("Initializing GCP clients...")
@@ -262,7 +347,24 @@ async def startup_event():
         worker_module.settings = settings
         sys.modules['app.worker'] = worker_module
 
+        # Initialize analysis queue (unbounded - can hold all incoming messages)
+        analysis_queue = asyncio.Queue()
+        logger.info("✅ Analysis queue initialized")
+
+        # Launch worker pool for parallel video processing
+        logger.info(f"🚀 Launching {settings.worker_pool_size} worker tasks...")
+        for worker_id in range(settings.worker_pool_size):
+            task = asyncio.create_task(
+                video_analysis_worker(
+                    worker_id=worker_id,
+                    video_analyzer=video_analyzer,
+                    firestore_client=firestore_client,
+                )
+            )
+            worker_tasks.append(task)
+
         logger.info("✅ All components initialized successfully")
+        logger.info(f"✅ {settings.worker_pool_size} workers ready for parallel processing")
         logger.info("✅ Ready to receive PubSub push messages at /analyze")
     except Exception as e:
         logger.error(f"Failed to initialize components: {e}")

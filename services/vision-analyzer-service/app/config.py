@@ -63,5 +63,8 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
+    # Worker pool settings
+    worker_pool_size: int = 10  # Number of concurrent video analysis workers
+
 
 settings = Settings()

@@ -9,7 +9,6 @@ import json
 import logging
 import time
 from typing import Any
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from google import genai
 from google.auth import default
@@ -20,15 +19,6 @@ from ..models import GeminiAnalysisResult, AnalysisMetrics
 from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
-
-# Thread pool for Gemini API calls with proper timeout support
-# We use ThreadPoolExecutor instead of asyncio.to_thread() because:
-# 1. asyncio.to_thread() doesn't support cancellation/timeout
-# 2. Future.result(timeout=X) can actually interrupt hanging calls
-# 3. Prevents videos from getting stuck when Gemini hangs
-# Note: max_workers=10 allows up to 10 concurrent Gemini API calls per instance
-# With multiple instances, this provides good parallelism while staying within quota
-_gemini_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="gemini")
 
 
 class GeminiClient:
@@ -179,35 +169,30 @@ class GeminiClient:
                 # IMPORTANT: Run blocking Gemini API call in thread to avoid blocking event loop
                 # This ensures health checks can still respond during long video analysis
                 #
-                # CRITICAL FIX: Use ThreadPoolExecutor with timeout instead of asyncio.to_thread()
-                # asyncio.to_thread() cannot be cancelled, which causes videos to hang forever
-                # when Gemini has issues downloading/processing YouTube videos
-                future = _gemini_executor.submit(
-                    self.client.models.generate_content,
-                    model=self.model_name,
-                    contents=[
-                        Part.from_uri(
-                            file_uri=youtube_url,
-                            mime_type="video/mp4",  # YouTube videos are mp4
-                        ),
-                        prompt,  # Text prompt as string
-                    ],
-                    config={
-                        "temperature": settings.gemini_temperature,
-                        "max_output_tokens": settings.gemini_max_output_tokens,
-                        "response_mime_type": "application/json",  # Force JSON output
-                    },
-                )
-
-                # Wait for result with 15-minute timeout
-                # This timeout is shorter than the 18-minute timeout in analyze.py
-                # so we can detect hangs and fail gracefully
+                # Use asyncio.wait_for with asyncio.to_thread for proper async timeout handling
+                # The worker pool in main.py ensures proper parallelism
                 try:
-                    response = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: future.result(timeout=900)  # 15 minutes
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.client.models.generate_content,
+                            model=self.model_name,
+                            contents=[
+                                Part.from_uri(
+                                    file_uri=youtube_url,
+                                    mime_type="video/mp4",  # YouTube videos are mp4
+                                ),
+                                prompt,  # Text prompt as string
+                            ],
+                            config={
+                                "temperature": settings.gemini_temperature,
+                                "max_output_tokens": settings.gemini_max_output_tokens,
+                                "response_mime_type": "application/json",  # Force JSON output
+                            },
+                        ),
+                        timeout=900  # 15 minutes
                     )
-                except FuturesTimeoutError:
-                    # Gemini API call hung for >15 minutes - this is a timeout, not an error
+                except asyncio.TimeoutError:
+                    # Gemini API call timed out after 15 minutes
                     logger.error(
                         f"Gemini API call timed out after 900 seconds for {youtube_url}. "
                         "Video may be too long, inaccessible, or Gemini backend is having issues."
