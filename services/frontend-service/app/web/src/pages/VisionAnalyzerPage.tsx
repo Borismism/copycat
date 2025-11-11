@@ -129,15 +129,95 @@ export default function VisionAnalyzerPage() {
     loadHistory(null, false)
   }, [])
 
-  // Auto-refresh every 2 seconds to show current running scans (REAL-TIME!)
+  // SSE connection for real-time updates (no more auto-refresh!)
   useEffect(() => {
-    const interval = setInterval(() => {
-      // Reload the first page to get latest scans (with refresh flag)
-      loadHistory(null, true)
-    }, 2000) // 2 seconds for near real-time updates
+    const eventSource = new EventSource('/api/channels/scan-updates-stream')
 
-    return () => clearInterval(interval)
-  }, [loadHistory])
+    eventSource.addEventListener('connected', () => {
+      console.log('[SSE] Connected to scan updates stream')
+    })
+
+    eventSource.addEventListener('scan_updated', (event) => {
+      const scan = JSON.parse(event.data)
+      // Update existing scan or add new one
+      setScans(prev => {
+        const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
+        if (existingIndex >= 0) {
+          // Update existing scan
+          const updated = [...prev]
+          updated[existingIndex] = { ...updated[existingIndex], ...scan }
+          return updated
+        } else {
+          // Add new scan at the top (only if status filter matches)
+          if (statusFilter === 'all' || scan.status === statusFilter) {
+            return [scan, ...prev]
+          }
+          return prev
+        }
+      })
+    })
+
+    eventSource.addEventListener('scan_completed', (event) => {
+      const scan = JSON.parse(event.data)
+      // Update scan status to completed
+      setScans(prev => {
+        const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
+        if (existingIndex >= 0) {
+          const updated = [...prev]
+          updated[existingIndex] = { ...updated[existingIndex], ...scan, status: 'completed' }
+          return updated
+        } else {
+          // Add completed scan at top if not exists
+          if (statusFilter === 'all' || statusFilter === 'completed') {
+            return [scan, ...prev]
+          }
+          return prev
+        }
+      })
+    })
+
+    eventSource.addEventListener('scan_failed', (event) => {
+      const scan = JSON.parse(event.data)
+      // Update scan status to failed
+      setScans(prev => {
+        const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
+        if (existingIndex >= 0) {
+          const updated = [...prev]
+          updated[existingIndex] = { ...updated[existingIndex], ...scan, status: 'failed' }
+          return updated
+        } else {
+          // Add failed scan at top if not exists
+          if (statusFilter === 'all' || statusFilter === 'failed') {
+            return [scan, ...prev]
+          }
+          return prev
+        }
+      })
+    })
+
+    eventSource.addEventListener('processing_videos', (event) => {
+      const videos = JSON.parse(event.data)
+      setProcessingVideos(videos)
+    })
+
+    eventSource.addEventListener('heartbeat', () => {
+      // Keep-alive, no action needed
+    })
+
+    eventSource.addEventListener('error', (event) => {
+      console.error('[SSE] Error:', event)
+    })
+
+    eventSource.onerror = () => {
+      console.error('[SSE] Connection error, will reconnect...')
+      // EventSource automatically reconnects
+    }
+
+    return () => {
+      console.log('[SSE] Disconnecting from scan updates stream')
+      eventSource.close()
+    }
+  }, [statusFilter])
 
   // Auto-fetch more pages when filter results in too few visible items
   useEffect(() => {
@@ -412,7 +492,7 @@ export default function VisionAnalyzerPage() {
             <div className="flex items-center gap-2 text-xs text-gray-500">
               <div className="flex items-center gap-1">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                Auto-updating every 5s
+                Live updates via SSE
               </div>
             </div>
           </div>

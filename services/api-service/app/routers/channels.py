@@ -1,13 +1,19 @@
 """Channel management endpoints."""
 
+import asyncio
 import json
+import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.core.firestore_client import firestore_client
 from app.models import ChannelListResponse, ChannelProfile, ChannelStats, ChannelTier, UserInfo, UserRole, VideoStatus
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -288,6 +294,153 @@ async def get_scan_history_with_processing(
         total_time = (time.time() - start_time) * 1000
         logger.error(f"❌ Request failed after {total_time:.2f}ms: {e!s}")
         raise HTTPException(status_code=500, detail=f"Failed to get scan data: {e!s}")
+
+
+@router.get("/scan-updates-stream")
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
+    """
+    SSE (Server-Sent Events) stream for real-time scan updates.
+
+    Streams scan status changes for running scans and new scans.
+    Frontend should use this to update records in place instead of polling.
+
+    Event types:
+    - scan_started: New scan has started
+    - scan_updated: Scan status changed (running -> completed/failed)
+    - scan_completed: Scan finished successfully
+    - scan_failed: Scan failed with error
+    - processing_video: Video moved to processing status
+    - heartbeat: Keep-alive ping every 15s
+    """
+    async def event_generator():
+        """Generate SSE events from Firestore snapshots."""
+        from google.cloud import firestore as fs
+
+        try:
+            # Track last seen timestamps to avoid duplicates
+            last_check = datetime.utcnow()
+
+            # Send initial connection event
+            yield f"event: connected\ndata: {json.dumps({'timestamp': datetime.utcnow().isoformat()})}\n\n"
+
+            while True:
+                try:
+                    # Query for recent scans (last 30 seconds)
+                    current_time = datetime.utcnow()
+                    time_window = (current_time - last_check).total_seconds()
+
+                    # Get running scans and recently completed/failed scans
+                    recent_scans = []
+
+                    # Running scans
+                    running_query = (
+                        firestore_client.db.collection("scan_history")
+                        .where("status", "==", "running")
+                        .order_by("started_at", direction=fs.Query.DESCENDING)
+                        .limit(50)
+                        .stream()
+                    )
+
+                    for doc in running_query:
+                        data = doc.to_dict()
+                        data["scan_id"] = doc.id
+                        recent_scans.append({
+                            "type": "scan_updated",
+                            "scan": data
+                        })
+
+                    # Recently completed scans (last 30s)
+                    if time_window > 0:
+                        completed_query = (
+                            firestore_client.db.collection("scan_history")
+                            .where("status", "in", ["completed", "failed"])
+                            .order_by("completed_at", direction=fs.Query.DESCENDING)
+                            .limit(20)
+                            .stream()
+                        )
+
+                        for doc in completed_query:
+                            data = doc.to_dict()
+                            completed_at = data.get("completed_at")
+
+                            # Check if completed recently
+                            if completed_at:
+                                if isinstance(completed_at, datetime):
+                                    completed_time = completed_at
+                                elif hasattr(completed_at, 'seconds'):
+                                    completed_time = datetime.fromtimestamp(completed_at.seconds)
+                                else:
+                                    continue
+
+                                # Only send if completed after last check
+                                if completed_time > last_check:
+                                    data["scan_id"] = doc.id
+                                    event_type = "scan_completed" if data["status"] == "completed" else "scan_failed"
+                                    recent_scans.append({
+                                        "type": event_type,
+                                        "scan": data
+                                    })
+
+                    # Send events
+                    for event in recent_scans:
+                        event_data = json.dumps(event["scan"])
+                        yield f"event: {event['type']}\ndata: {event_data}\n\n"
+
+                    # Get processing videos
+                    processing_videos = []
+                    processing_query = (
+                        firestore_client.videos_collection
+                        .where("status", "in", ["pending", "processing"])
+                        .where("matched_ips", "!=", [])
+                        .order_by("scan_priority", direction=fs.Query.DESCENDING)
+                        .limit(10)
+                        .stream()
+                    )
+
+                    for doc in processing_query:
+                        data = doc.to_dict()
+                        processing_videos.append({
+                            "video_id": doc.id,
+                            "title": data.get("title", "Unknown"),
+                            "channel_title": data.get("channel_title"),
+                            "matched_ips": data.get("matched_ips", []),
+                            "status": data.get("status")
+                        })
+
+                    # Send processing videos update
+                    if processing_videos:
+                        yield f"event: processing_videos\ndata: {json.dumps(processing_videos)}\n\n"
+
+                    last_check = current_time
+
+                    # Wait before next check (5 seconds)
+                    await asyncio.sleep(5)
+
+                    # Send heartbeat every iteration
+                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': datetime.utcnow().isoformat()})}\n\n"
+
+                except Exception as e:
+                    logger.error(f"Error in SSE event loop: {e}")
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    await asyncio.sleep(5)
+
+        except asyncio.CancelledError:
+            logger.info("SSE stream cancelled by client")
+            raise
+        except Exception as e:
+            logger.error(f"Fatal error in SSE stream: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
 
 
 @router.get("/scan-history")
