@@ -417,11 +417,14 @@ async def test_cleanup_proves_deployment_recovery():
         for i in range(3)
     ]
 
-    # Create mock Firestore for Instance B
+    # Create mock Firestore for Instance B (reuse collections)
     mock_client = Mock()
+    scan_history_collection = MockCollectionReference(instance_a_scans)
+    videos_collection = MockCollectionReference(instance_a_videos)
+
     mock_client.collection = Mock(side_effect=lambda name: (
-        MockCollectionReference(instance_a_scans) if name == 'scan_history'
-        else MockCollectionReference(instance_a_videos) if name == 'videos'
+        scan_history_collection if name == 'scan_history'
+        else videos_collection if name == 'videos'
         else MockCollectionReference([])
     ))
     mock_client._scan_history_docs = instance_a_scans
@@ -440,8 +443,9 @@ async def test_cleanup_proves_deployment_recovery():
 
     # VERIFY: All videos reset to 'discovered'
     for i in range(3):
-        video_ref = mock_client.collection('videos').document(f'video-{i}')
-        assert video_ref.update.called
+        video_ref = videos_collection._document_refs.get(f'video-{i}')
+        assert video_ref is not None, f"video-{i} reference should exist"
+        assert video_ref.update.called, f"video-{i} update should have been called"
         update_args = video_ref.update.call_args[0][0]
         assert update_args['status'] == 'discovered'
         assert update_args['processing_started_at'] is None
