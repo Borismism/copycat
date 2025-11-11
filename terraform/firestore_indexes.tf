@@ -154,6 +154,33 @@ resource "google_firestore_index" "videos_channel_scan_priority_matched_ips" {
   }
 }
 
+# ==============================================================================
+# scan_history collection indexes
+# ==============================================================================
+
+resource "google_firestore_index" "scan_history_status_completed_at" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "scan_history"
+
+  # Index for: .where("status", "in", ["completed", "failed"]).order_by("completed_at", DESC)
+  # Required for SSE stream to fetch recently completed/failed scans
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "completed_at"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
 # Note: Single-field index for discovered_at is automatically created by Firestore
 # No composite index needed for: .where("discovered_at", ">=", start).order_by("discovered_at")
 # Correct firestore index imported
