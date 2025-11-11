@@ -192,11 +192,53 @@ deploy_infrastructure() {
     log_success "Global infrastructure deployed to $env"
 }
 
+run_tests() {
+    local service=$1
+    local service_dir="services/$service"
+
+    # Only run tests for services that have them
+    if [[ ! -d "$service_dir/tests" ]]; then
+        log_info "No tests found for $service, skipping..."
+        return 0
+    fi
+
+    log_info "Running tests for $service..."
+
+    # Change to service directory
+    cd "$service_dir"
+
+    # Run pytest with coverage
+    if uv run pytest tests/ -v --tb=short --maxfail=1 2>&1 | tee /tmp/pytest-output.txt; then
+        log_success "All tests passed for $service"
+        cd ../..
+        return 0
+    else
+        log_error "Tests FAILED for $service"
+        log_error "See output above for details"
+        cd ../..
+
+        # Ask user if they want to continue
+        echo ""
+        log_warning "Tests failed! Deploy anyway? (y/N)"
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            log_warning "Continuing deployment despite test failures..."
+            return 0
+        else
+            log_error "Deployment aborted due to test failures"
+            exit 1
+        fi
+    fi
+}
+
 deploy_service() {
     local service=$1
     local env=$2
 
     log_info "Deploying ${YELLOW}$service${NC} to ${YELLOW}$env${NC}..."
+
+    # CRITICAL: Run tests before deploying (prevents broken code in production)
+    run_tests "$service"
 
     # Build and push Docker image
     local image_url=$(build_and_push_image "$service")
