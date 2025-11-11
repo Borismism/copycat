@@ -158,6 +158,29 @@ resource "google_firestore_index" "videos_channel_scan_priority_matched_ips" {
 # scan_history collection indexes
 # ==============================================================================
 
+resource "google_firestore_index" "scan_history_status_started_at" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "scan_history"
+
+  # Index for: .where("status", "==", "running").order_by("started_at", DESC)
+  # Required for SSE stream to fetch running scans
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "started_at"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
 resource "google_firestore_index" "scan_history_status_completed_at" {
   project    = var.project_id
   database   = google_firestore_database.copycat.name
