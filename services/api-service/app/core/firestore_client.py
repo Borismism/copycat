@@ -378,7 +378,11 @@ class FirestoreClient:
             channels_tracked = 0
 
         # Get today's quota usage from quota_usage collection
-        today_key = now.strftime("%Y-%m-%d")
+        # IMPORTANT: Use Pacific Time (same as quota_manager) since YouTube API quota resets at midnight PT
+        from zoneinfo import ZoneInfo
+        pacific_tz = ZoneInfo("America/Los_Angeles")
+        now_pacific = now.astimezone(pacific_tz)
+        today_key = now_pacific.strftime("%Y-%m-%d")
         quota_doc = self.db.collection("quota_usage").document(today_key).get()
         quota_used = 0
         if quota_doc.exists:
