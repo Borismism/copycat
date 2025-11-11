@@ -158,6 +158,13 @@ async def discover(
     Returns:
         Immediate response with run_id (discovery runs in background)
     """
+    # Refresh quota from Google API BEFORE starting discovery
+    try:
+        quota_manager.reload_usage()
+        logger.info("Refreshed quota from Google API before discovery run")
+    except Exception as e:
+        logger.error(f"Failed to refresh quota before discovery: {e}")
+
     # Auto-calculate optimal quota if not specified
     if max_quota is None:
         max_quota = quota_manager.calculate_optimal_quota()
@@ -251,6 +258,13 @@ async def discover(
             except Exception as e:
                 logger.error(f"Failed to update discovery history: {e}")
 
+            # Refresh quota from Google API after discovery completes
+            try:
+                quota_manager.reload_usage()
+                logger.info("Refreshed quota usage from Google API after discovery run")
+            except Exception as e:
+                logger.error(f"Failed to refresh quota after discovery: {e}")
+
         except Exception as e:
             logger.error(f"Discovery failed: {e}")
 
@@ -289,6 +303,13 @@ async def run_discovery_stream(
     Streams progress events as discovery executes queries.
     Auto-calculates optimal quota if not specified.
     """
+    # Refresh quota from Google API BEFORE starting discovery
+    try:
+        quota_manager.reload_usage()
+        logger.info("Refreshed quota from Google API before discovery stream")
+    except Exception as e:
+        logger.error(f"Failed to refresh quota before discovery stream: {e}")
+
     # Auto-calculate optimal quota if not specified
     if max_quota is None:
         max_quota = quota_manager.calculate_optimal_quota()
@@ -432,6 +453,13 @@ async def run_discovery_stream(
                 logger.info(f"Updated discovery history {run_id} to completed with full details")
             except Exception as hist_err:
                 logger.warning(f"Failed to update discovery history: {hist_err}")
+
+            # Refresh quota from Google API after discovery completes
+            try:
+                quota_manager.reload_usage()
+                logger.info("Refreshed quota usage from Google API after discovery stream")
+            except Exception as e:
+                logger.error(f"Failed to refresh quota after discovery stream: {e}")
 
             result = {
                 'status': 'complete',

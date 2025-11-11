@@ -86,18 +86,46 @@ async def trigger_discovery_stream(max_quota: int = 1000, user: UserInfo = Depen
 
 
 @router.get("/quota", response_model=QuotaStatus)
-async def get_quota_status():
-    """Get current YouTube API quota status."""
+async def get_quota_status(
+    firestore_client: FirestoreClient = Depends(get_firestore_client),
+):
+    """
+    Get current YouTube API quota status from Firestore.
+
+    Reads from quota_usage collection (single source of truth).
+    Updated automatically after discovery runs and on-demand via /quota/refresh.
+    """
     try:
-        quota_data = await discovery_client.get_quota_status()
+        from datetime import datetime, UTC
+        from zoneinfo import ZoneInfo
+
+        # Get today's date in Pacific Time (YouTube API quota resets at midnight PT)
+        pacific_tz = ZoneInfo("America/Los_Angeles")
+        now_pacific = datetime.now(UTC).astimezone(pacific_tz)
+        today_key = now_pacific.strftime("%Y-%m-%d")
+
+        # Read from Firestore quota_usage collection
+        doc = firestore_client.db.collection("quota_usage").document(today_key).get()
+
+        if doc.exists:
+            data = doc.to_dict()
+            used_quota = data.get("units_used", 0)
+            daily_quota = data.get("daily_quota", 10000)
+        else:
+            # No usage record for today - quota is fresh
+            used_quota = 0
+            daily_quota = 10000
+
+        remaining_quota = max(0, daily_quota - used_quota)
+        utilization = (used_quota / daily_quota) if daily_quota > 0 else 0.0
 
         return QuotaStatus(
-            daily_quota=quota_data.get("daily_quota", 10000),
-            used_quota=quota_data.get("used_quota", 0),
-            remaining_quota=quota_data.get("remaining_quota", 10000),
-            utilization=quota_data.get("utilization", 0.0),
-            last_reset=quota_data.get("last_reset"),
-            next_reset=quota_data.get("next_reset"),
+            daily_quota=daily_quota,
+            used_quota=used_quota,
+            remaining_quota=remaining_quota,
+            utilization=utilization,
+            last_reset=None,  # Not tracked yet
+            next_reset=None,  # Not tracked yet
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get quota status: {e!s}")
