@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, UTC
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from google.cloud import firestore
 from google.cloud import monitoring_v3
@@ -90,10 +91,14 @@ class QuotaManager:
         """
         Get today's date key for Firestore document.
 
+        Uses Pacific Time since YouTube API quota resets at midnight PT.
+
         Returns:
-            Date string in YYYY-MM-DD format (UTC)
+            Date string in YYYY-MM-DD format (Pacific Time)
         """
-        return datetime.now(UTC).strftime("%Y-%m-%d")
+        pacific_tz = ZoneInfo("America/Los_Angeles")
+        now_pacific = datetime.now(UTC).astimezone(pacific_tz)
+        return now_pacific.strftime("%Y-%m-%d")
 
     def _load_today_usage(self) -> int:
         """
@@ -157,18 +162,24 @@ class QuotaManager:
         This queries the real YouTube API quota consumed according to Google's metrics,
         not our estimates.
 
+        YouTube API quotas reset at midnight Pacific Time (America/Los_Angeles).
+
         Returns:
             Actual quota units used today according to Google
         """
         try:
             project_name = f"projects/{self.project_id}"
 
-            # Query for YouTube API quota usage in the last 24 hours
-            now = datetime.now(UTC)
-            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            # YouTube API quota resets at midnight Pacific Time, not UTC
+            # Calculate start of day in Pacific Time, then convert to UTC
+            pacific_tz = ZoneInfo("America/Los_Angeles")
+            now_utc = datetime.now(UTC)
+            now_pacific = now_utc.astimezone(pacific_tz)
+            start_of_day_pacific = now_pacific.replace(hour=0, minute=0, second=0, microsecond=0)
+            start_of_day = start_of_day_pacific.astimezone(UTC)
 
             interval = monitoring_v3.TimeInterval({
-                "end_time": now,
+                "end_time": now_utc,
                 "start_time": start_of_day,
             })
 
@@ -363,7 +374,7 @@ class QuotaManager:
 
         Strategy:
         - If max_quota not specified, intelligently distribute remaining quota
-        - Calculate hours remaining until UTC midnight (quota reset)
+        - Calculate hours remaining until Pacific Time midnight (quota reset)
         - Distribute remaining quota evenly across remaining hours
         - Ensures we use all quota by end of day without running out early
 
@@ -371,11 +382,11 @@ class QuotaManager:
             Optimal quota units to use for this discovery run
 
         Example:
-            Current time: 14:00 UTC (2 PM)
+            Current time: 14:00 PT (2 PM)
             Daily quota: 10,000 units
             Used so far: 3,000 units
             Remaining: 7,000 units
-            Hours until midnight: 10 hours
+            Hours until midnight PT: 10 hours
             Optimal quota per run: 7,000 / 10 = 700 units
         """
         remaining_quota = self.get_remaining()
@@ -384,10 +395,12 @@ class QuotaManager:
             logger.warning("No quota remaining for today")
             return 0
 
-        # Calculate hours until UTC midnight (quota reset)
-        now = datetime.now(UTC)
-        midnight_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        time_until_reset = midnight_today - now
+        # Calculate hours until Pacific Time midnight (quota reset)
+        pacific_tz = ZoneInfo("America/Los_Angeles")
+        now_utc = datetime.now(UTC)
+        now_pacific = now_utc.astimezone(pacific_tz)
+        midnight_pacific = now_pacific.replace(hour=23, minute=59, second=59, microsecond=999999)
+        time_until_reset = midnight_pacific - now_pacific
         hours_remaining = max(1, time_until_reset.total_seconds() / 3600)  # At least 1 hour
 
         # Distribute remaining quota evenly across remaining hours
