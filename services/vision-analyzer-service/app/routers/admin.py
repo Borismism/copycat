@@ -458,3 +458,122 @@ async def trigger_batch_scan(request: BatchScanRequest):
     except Exception as e:
         log_exception_json(logger, "Failed to trigger batch scan", e, severity="ERROR")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class CleanupResponse(BaseModel):
+    """Cleanup stuck videos response."""
+
+    success: bool
+    message: str
+    videos_marked_failed: int
+    scan_history_updated: int
+
+
+@router.post("/admin/cleanup-stuck-videos", response_model=CleanupResponse)
+async def cleanup_stuck_videos():
+    """
+    Cleanup videos stuck in 'processing' status.
+
+    This endpoint is called by Cloud Scheduler every 10 minutes to catch videos
+    that got stuck due to:
+    - Gemini API hanging
+    - Instance crashes
+    - Cloud Run scale-down
+    - Network issues
+
+    Returns:
+        CleanupResponse with statistics
+    """
+    from datetime import datetime, timedelta, timezone
+    from google.cloud import firestore
+    from ..config import settings
+
+    STUCK_THRESHOLD_MINUTES = 20  # Videos processing >20 minutes are stuck
+
+    try:
+        logger.info("🔍 Cleanup cron: Checking for stuck videos...")
+
+        firestore_client = firestore.Client(
+            project=settings.gcp_project_id,
+            database=settings.firestore_database_id,
+        )
+
+        # Calculate cutoff time
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=STUCK_THRESHOLD_MINUTES)
+
+        # Query videos in processing status
+        videos_ref = firestore_client.collection(settings.firestore_videos_collection)
+        stuck_videos = videos_ref.where("status", "==", "processing").stream()
+
+        marked_count = 0
+        scan_history_count = 0
+
+        for video in stuck_videos:
+            video_data = video.to_dict()
+            video_id = video.id
+
+            # Check processing_started_at timestamp
+            processing_started = video_data.get("processing_started_at")
+
+            should_mark = False
+            if not processing_started:
+                # No timestamp - definitely stuck
+                logger.warning(f"Video {video_id} has no processing_started_at, marking as failed")
+                should_mark = True
+            else:
+                # Convert to datetime if needed
+                if hasattr(processing_started, "timestamp"):
+                    started_dt = datetime.fromtimestamp(processing_started.timestamp(), tz=timezone.utc)
+                else:
+                    started_dt = processing_started
+
+                # Ensure timezone-aware
+                if started_dt.tzinfo is None:
+                    started_dt = started_dt.replace(tzinfo=timezone.utc)
+
+                # Check if stuck
+                if started_dt < cutoff_time:
+                    stuck_duration_mins = (datetime.now(timezone.utc) - started_dt).total_seconds() / 60
+                    logger.warning(f"Video {video_id} stuck for {stuck_duration_mins:.1f}m, marking as failed")
+                    should_mark = True
+
+            if should_mark:
+                # Mark video as failed
+                video.reference.update({
+                    "status": "failed",
+                    "error_message": f"Video stuck in processing for >{STUCK_THRESHOLD_MINUTES} minutes - likely Gemini timeout or instance crash",
+                    "error_type": "ProcessingTimeout",
+                    "failed_at": firestore.SERVER_TIMESTAMP,
+                    "processing_started_at": firestore.DELETE_FIELD,
+                })
+
+                marked_count += 1
+
+                # Mark related scan history as failed
+                scan_history_query = firestore_client.collection("scan_history") \
+                    .where("video_id", "==", video_id) \
+                    .where("status", "==", "running")
+
+                for scan_doc in scan_history_query.stream():
+                    scan_doc.reference.update({
+                        "status": "failed",
+                        "completed_at": firestore.SERVER_TIMESTAMP,
+                        "error_message": "Video stuck in processing (cleanup cron)",
+                    })
+                    scan_history_count += 1
+
+        logger.info(
+            f"Cleanup complete: marked {marked_count} videos as failed, "
+            f"updated {scan_history_count} scan history entries"
+        )
+
+        return CleanupResponse(
+            success=True,
+            message=f"Marked {marked_count} stuck videos as failed",
+            videos_marked_failed=marked_count,
+            scan_history_updated=scan_history_count
+        )
+
+    except Exception as e:
+        log_exception_json(logger, "Failed to cleanup stuck videos", e, severity="ERROR")
+        raise HTTPException(status_code=500, detail=str(e))

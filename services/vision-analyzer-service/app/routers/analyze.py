@@ -47,7 +47,13 @@ async def process_video_analysis(
 
     This runs in the background so it doesn't block health checks.
     """
+    import app.main as main_module
+
     video_id = scan_message.video_id
+
+    # Track active processing for graceful shutdown
+    main_module.active_processing_count += 1
+    logger.info(f"📹 Processing started: {video_id} (active: {main_module.active_processing_count})")
 
     try:
         # Process video analysis with configs (with timeout protection)
@@ -114,27 +120,63 @@ async def process_video_analysis(
     except Exception as e:
         log_exception_json(logger, f"Background task failed for video {video_id}", e, severity="ERROR")
 
+        # Categorize failure type
+        error_str = str(e)
+        error_type = type(e).__name__
+
+        # Determine video status based on error type
+        if "PERMISSION_DENIED" in error_str or "not accessible" in error_str:
+            # Video is inaccessible (private, deleted, geo-blocked, etc.)
+            video_status = "inaccessible"
+            scan_status = "failed"
+            error_message = f"Video not accessible: {error_str[:200]}"
+            logger.warning(f"Video {video_id} is inaccessible, marking as such")
+        elif error_type == "TimeoutError" or "timed out" in error_str.lower():
+            # Timeout - Gemini took too long, likely backend issue or complex video
+            video_status = "failed"
+            scan_status = "failed"
+            error_message = f"Analysis timed out: {error_str[:200]}"
+            logger.warning(f"Video {video_id} analysis timed out")
+        else:
+            # Other errors - mark as failed, can be retried
+            video_status = "failed"
+            scan_status = "failed"
+            error_message = str(e)[:300]
+
         # Update scan history to failed
         try:
             firestore_client.collection("scan_history").document(scan_id).update({
-                "status": "failed",
+                "status": scan_status,
                 "completed_at": firestore.SERVER_TIMESTAMP,
-                "error_message": str(e),
+                "error_message": error_message,
+                "error_type": error_type,
             })
         except Exception as e:
             log_exception_json(logger, "Failed to update scan history after background task failure", e, severity="WARNING", scan_id=scan_id)
 
-        # Update video status to failed
+        # Update video status with proper categorization
         try:
             doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(video_id)
             doc_ref.update({
-                "status": "failed",
-                "error_message": str(e),
-                "error_type": type(e).__name__,
+                "status": video_status,
+                "error_message": error_message,
+                "error_type": error_type,
                 "failed_at": firestore.SERVER_TIMESTAMP
             })
+            logger.info(f"Updated video {video_id} status to '{video_status}' with error type '{error_type}'")
         except Exception as update_error:
             logger.error(f"Failed to update video status to failed: {update_error}")
+
+    finally:
+        # CRITICAL: Always decrement active processing count
+        main_module.active_processing_count -= 1
+        logger.info(f"✅ Processing completed: {video_id} (active: {main_module.active_processing_count})")
+
+        # If shutdown was requested and no more active processing, exit now
+        if main_module.shutdown_requested and main_module.active_processing_count == 0:
+            logger.warning("⚠️  Shutdown complete - all processing finished, exiting now")
+            import sys
+            sys.exit(0)
 
 
 @router.post("/analyze")
@@ -151,7 +193,16 @@ async def analyze_video(request: Request, background_tasks: BackgroundTasks):
         200 OK: Message accepted (processing in background)
         500 Error: Message should be retried
     """
+    import app.main as main_module
     global video_analyzer, budget_manager, config_loader
+
+    # CRITICAL: Reject new work if shutdown is in progress
+    if main_module.shutdown_requested:
+        logger.warning("⚠️  Rejecting new request - shutdown in progress")
+        raise HTTPException(
+            status_code=503,
+            detail="Service is shutting down - message will be retried on new instance"
+        )
 
     if not video_analyzer or not budget_manager or not config_loader:
         logger.error("Service components not initialized")

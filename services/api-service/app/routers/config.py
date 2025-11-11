@@ -8,10 +8,12 @@ import os
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from google.cloud import firestore
 from pydantic import BaseModel
 
+from app.core.auth import get_current_user, require_role
+from app.models import UserInfo, UserRole
 from app.utils.logging_utils import log_exception_json
 
 router = APIRouter(prefix="/config", tags=["configuration"])
@@ -19,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("")
-async def get_configuration() -> dict[str, Any]:
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_configuration(user: UserInfo = Depends(get_current_user)) -> dict[str, Any]:
     """
     Get shared configuration for frontend.
 
@@ -30,7 +33,8 @@ async def get_configuration() -> dict[str, Any]:
 
 
 @router.get("/characters")
-async def get_all_characters(priority: str | None = None) -> dict[str, Any]:
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_all_characters(user: UserInfo = Depends(get_current_user), priority: str | None = None) -> dict[str, Any]:
     """
     Get all monitored characters.
 
@@ -60,7 +64,8 @@ async def get_all_characters(priority: str | None = None) -> dict[str, Any]:
 
 
 @router.get("/ips")
-async def get_intellectual_properties() -> dict[str, Any]:
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_intellectual_properties(user: UserInfo = Depends(get_current_user)) -> dict[str, Any]:
     """
     Get all intellectual property definitions.
 
@@ -85,7 +90,8 @@ async def get_intellectual_properties() -> dict[str, Any]:
 
 
 @router.get("/client")
-async def get_client_info() -> dict[str, Any]:
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_client_info(user: UserInfo = Depends(get_current_user)) -> dict[str, Any]:
     """
     Get client information.
 
@@ -107,7 +113,8 @@ async def get_client_info() -> dict[str, Any]:
 
 
 @router.get("/list")
-async def list_ip_configs() -> dict[str, Any]:
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def list_ip_configs(user: UserInfo = Depends(get_current_user)) -> dict[str, Any]:
     """
     List all IP target configurations from Firestore.
 

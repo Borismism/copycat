@@ -23,18 +23,34 @@ export default function DiscoveryPage() {
   const historyLimit = 20
 
   // Fetch summary data for dashboard metrics
-  const { data: summary } = useSWR(
+  const { data: summary, error: summaryError } = useSWR(
     'summary',
     () => statusAPI.getSummary(),
     { refreshInterval: 30000 }
   )
 
   // Fetch quota with auto-refresh (every 30 seconds)
-  const { data: quota, isLoading: quotaLoading } = useSWR(
+  const { data: quota, isLoading: quotaLoading, error: quotaError } = useSWR(
     'discovery-quota',
     () => discoveryAPI.getQuota(),
     { refreshInterval: 30000 }
   )
+
+  // Check for access errors
+  const accessError = summaryError || quotaError
+  if (accessError) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <p className="text-red-800">Error: {accessError.message || 'Access denied'}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-2 text-red-600 hover:text-red-800 underline"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
 
   // Load discovery history
   const loadHistory = useCallback(async (offset: number = 0, isRefresh: boolean = false) => {
@@ -103,17 +119,6 @@ export default function DiscoveryPage() {
     }
   }, [hasMoreHistory, historyLoading, historyOffset])  // Remove loadHistory to prevent re-creating observer
 
-  const loadQuota = async () => {
-    try {
-      setQuotaLoading(true)
-      const quotaData = await discoveryAPI.getQuota()
-      setQuota(quotaData)
-    } catch (err) {
-      console.error('Failed to load quota:', err)
-    } finally {
-      setQuotaLoading(false)
-    }
-  }
 
   const triggerDiscovery = async () => {
     // Validate quota input
@@ -155,9 +160,7 @@ export default function DiscoveryPage() {
             state.isComplete = true
             console.log('[SSE] Complete! Data:', data)
 
-            // Reload quota to show updated usage
-            loadQuota()
-
+            // Quota will auto-refresh via useSWR (every 30s)
             // Reload history to show the new run
             loadHistory(0, false)
 

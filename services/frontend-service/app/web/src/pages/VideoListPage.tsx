@@ -33,6 +33,7 @@ export default function VideoListPage() {
   const [channels, setChannels] = useState<ChannelProfile[]>([])
   const [ipConfigs, setIpConfigs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
   const [sortBy, setSortBy] = useState('scan_priority')
@@ -84,19 +85,24 @@ export default function VideoListPage() {
 
       console.log('Channels loaded:', allChannels.length, 'channels')
       setChannels(allChannels)
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load channels:', err)
+      setError(err?.message || 'Failed to load channels')
     }
   }
 
   const loadIpConfigs = async () => {
     try {
       const response = await fetch('/api/config/list')
-      if (!response.ok) throw new Error('Failed to load IP configs')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Failed to load IP configs' }))
+        throw new Error(errorData.detail || 'Failed to load IP configs')
+      }
       const data = await response.json()
       setIpConfigs(data.configs)
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load IP configs:', err)
+      setError(err?.message || 'Failed to load configuration')
     }
   }
 
@@ -227,6 +233,20 @@ export default function VideoListPage() {
   }
 
   const activeFiltersCount = [channelFilter, statusFilter, ipConfigFilter].filter(Boolean).length
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+        <p className="text-red-800">Error: {error}</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-2 text-red-600 hover:text-red-800 underline"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
 
   if (loading && videos.length === 0) {
     return <div className="text-center py-12">Loading...</div>

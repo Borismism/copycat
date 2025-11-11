@@ -15,9 +15,11 @@ class FirestoreClient:
     """Client for Firestore operations."""
 
     def __init__(self):
+        # Use "(default)" database for emulator, otherwise use configured database
+        database = "(default)" if settings.firestore_emulator_host else settings.firestore_database
         self.db = firestore.Client(
             project=settings.gcp_project_id,
-            database=settings.firestore_database
+            database=database
         )
         self.videos_collection = self.db.collection("videos")
         self.channels_collection = self.db.collection("channels")

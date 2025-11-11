@@ -71,69 +71,89 @@ async def _cleanup_stuck_videos(firestore_client: firestore.Client):
     """
     Clean up videos stuck in 'processing' state from previous instance crashes.
 
-    This handles cases where Cloud Run killed the instance (e.g., due to failed
-    health checks) before the background task could update video status.
+    This is the RESILIENT approach - check scan_history for incomplete scans
+    instead of relying on timestamps, making the system idempotent.
+
+    This handles cases where Cloud Run killed the instance (deployment, crash,
+    autoscaling) before the background task could complete.
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timezone
 
     try:
-        logger.info("🔧 Checking for stuck videos from previous instance...")
+        logger.info("🔧 Checking for incomplete scans from previous instance...")
 
-        # Find videos stuck in 'processing' for more than 60 minutes
-        # (Long videos + autoscaling means we need generous timeout)
-        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=60)
-
-        videos_ref = firestore_client.collection(settings.firestore_videos_collection)
-        stuck_videos = videos_ref.where('status', '==', 'processing').stream()
+        # RESILIENT APPROACH: Find ALL scan_history entries still in 'running' state
+        # These were killed mid-processing when the instance was terminated
+        stuck_scans = firestore_client.collection('scan_history') \
+            .where('status', '==', 'running') \
+            .stream()
 
         reset_count = 0
-        for video_doc in stuck_videos:
-            video_id = video_doc.id
-            data = video_doc.to_dict()
+        stuck_scan_list = list(stuck_scans)
 
-            # Check if stuck for more than 60 minutes
-            # IMPORTANT: Only check processing_started_at, not updated_at!
-            # updated_at can be stale from initial discovery
-            processing_started_at = data.get('processing_started_at')
+        if not stuck_scan_list:
+            logger.info("✅ No stuck scans found")
+            return
 
-            # Skip if no processing_started_at (shouldn't happen, but be safe)
-            if not processing_started_at:
+        logger.warning(f"Found {len(stuck_scan_list)} stuck scans from previous instance")
+
+        for scan_doc in stuck_scan_list:
+            scan_data = scan_doc.to_dict()
+            scan_id = scan_doc.id
+            video_id = scan_data.get('video_id')
+
+            if not video_id:
+                logger.warning(f"Scan {scan_id} has no video_id, skipping")
                 continue
 
-            if processing_started_at < cutoff_time:
-                # Video is stuck - reset it
-                logger.warning(
-                    f"🔧 Resetting stuck video {video_id}: "
-                    f"processing_started_at={processing_started_at}, duration={data.get('duration_seconds')}s"
-                )
+            logger.warning(
+                f"🔧 Resetting stuck scan {scan_id[:8]}... for video {video_id}"
+            )
 
-                video_doc.reference.update({
-                    'status': 'discovered',
-                    'processing_started_at': None,
-                    'error_message': 'Reset from stuck processing state (instance crash/kill)',
+            # Mark scan as failed (instance was killed mid-processing)
+            try:
+                scan_doc.reference.update({
+                    'status': 'failed',
+                    'completed_at': firestore.SERVER_TIMESTAMP,
+                    'error_message': 'Instance terminated during processing (deployment/crash/autoscale)',
                     'reset_at': firestore.SERVER_TIMESTAMP,
-                    'updated_at': firestore.SERVER_TIMESTAMP,
                 })
+            except Exception as e:
+                logger.error(f"Failed to update scan_history {scan_id}: {e}")
 
-                # Update related scan history to failed
-                scan_histories = firestore_client.collection('scan_history') \
-                    .where('video_id', '==', video_id) \
-                    .where('status', '==', 'running') \
-                    .stream()
+            # Reset video to 'discovered' so it can be reprocessed
+            try:
+                video_ref = firestore_client.collection(settings.firestore_videos_collection).document(video_id)
+                video_doc = video_ref.get()
 
-                for scan_doc in scan_histories:
-                    scan_doc.reference.update({
-                        'status': 'failed',
-                        'completed_at': firestore.SERVER_TIMESTAMP,
-                        'error_message': 'Scan reset - video stuck in processing (instance crash)',
-                    })
+                if video_doc.exists:
+                    video_data = video_doc.to_dict()
+                    current_status = video_data.get('status')
 
-                reset_count += 1
+                    # Only reset if still in 'processing' state
+                    # (it might have been updated by another instance)
+                    if current_status == 'processing':
+                        video_ref.update({
+                            'status': 'discovered',
+                            'processing_started_at': None,
+                            'error_message': 'Reset from incomplete scan (instance terminated)',
+                            'reset_at': firestore.SERVER_TIMESTAMP,
+                            'updated_at': firestore.SERVER_TIMESTAMP,
+                        })
+                        logger.info(f"✅ Reset video {video_id} to 'discovered'")
+                        reset_count += 1
+                    else:
+                        logger.info(f"Video {video_id} already in '{current_status}' state, skipping reset")
+                else:
+                    logger.warning(f"Video {video_id} not found for scan {scan_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to reset video {video_id}: {e}")
 
         if reset_count > 0:
-            logger.info(f"✅ Reset {reset_count} stuck video(s)")
+            logger.warning(f"⚠️  Reset {reset_count} stuck video(s) from {len(stuck_scan_list)} incomplete scans")
         else:
-            logger.info("✅ No stuck videos found")
+            logger.info(f"✅ Processed {len(stuck_scan_list)} stuck scans (videos already processed)")
 
     except Exception as e:
         # Don't fail startup if cleanup fails
@@ -143,6 +163,47 @@ async def _cleanup_stuck_videos(firestore_client: firestore.Client):
             e,
             severity="WARNING"
         )
+
+
+import signal
+import sys
+
+# Track active processing to prevent premature shutdown
+active_processing_count = 0
+shutdown_requested = False
+
+
+def signal_handler(signum, frame):
+    """
+    Handle SIGTERM from Cloud Run deployments.
+
+    CRITICAL: This prevents Cloud Run from killing instances mid-processing.
+    When a deployment happens, Cloud Run sends SIGTERM and waits up to
+    terminationGracePeriodSeconds (default 30s) before SIGKILL.
+
+    We block shutdown until all active processing completes.
+    """
+    global shutdown_requested
+
+    signal_name = "SIGTERM" if signum == signal.SIGTERM else f"signal {signum}"
+    logger.warning(f"⚠️  Received {signal_name} - graceful shutdown initiated")
+    logger.warning(f"⚠️  Active processing: {active_processing_count} videos")
+
+    if active_processing_count > 0:
+        logger.warning(
+            f"⚠️  Waiting for {active_processing_count} active video(s) to complete before shutdown"
+        )
+        shutdown_requested = True
+        # Don't exit - let processing complete
+        # Cloud Run will wait up to terminationGracePeriodSeconds before SIGKILL
+    else:
+        logger.info("✅ No active processing, exiting gracefully")
+        sys.exit(0)
+
+
+# Register signal handlers BEFORE startup
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 
 @app.on_event("startup")
@@ -210,6 +271,55 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown."""
+    """Cleanup on shutdown - mark any videos currently processing as failed."""
     logger.info(f"Shutting down {settings.service_name}")
+
+    try:
+        # Get firestore client
+        firestore_client = firestore.Client(
+            project=settings.gcp_project_id,
+            database=settings.firestore_database_id,
+        )
+
+        # Find videos this instance was processing
+        # CRITICAL: Mark them as failed so they don't stay stuck
+        videos_ref = firestore_client.collection(settings.firestore_videos_collection)
+        processing_videos = videos_ref.where('status', '==', 'processing').limit(10).stream()
+
+        marked_count = 0
+        for video_doc in processing_videos:
+            video_id = video_doc.id
+            try:
+                video_doc.reference.update({
+                    'status': 'failed',
+                    'error_message': 'Instance shutdown during processing (Cloud Run scale-down or health check failure)',
+                    'error_type': 'InstanceShutdown',
+                    'failed_at': firestore.SERVER_TIMESTAMP,
+                })
+
+                # Also mark scan history as failed
+                scan_histories = firestore_client.collection('scan_history') \
+                    .where('video_id', '==', video_id) \
+                    .where('status', '==', 'running') \
+                    .stream()
+
+                for scan_doc in scan_histories:
+                    scan_doc.reference.update({
+                        'status': 'failed',
+                        'completed_at': firestore.SERVER_TIMESTAMP,
+                        'error_message': 'Instance shutdown during scan',
+                    })
+
+                marked_count += 1
+                logger.warning(f"Marked video {video_id} as failed due to shutdown")
+            except Exception as e:
+                logger.error(f"Failed to mark video {video_id} as failed during shutdown: {e}")
+
+        if marked_count > 0:
+            logger.info(f"Marked {marked_count} processing video(s) as failed on shutdown")
+
+    except Exception as e:
+        # Don't fail shutdown if cleanup fails
+        logger.error(f"Error during shutdown cleanup: {e}")
+
     logger.info("Service shutdown complete")

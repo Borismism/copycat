@@ -7,20 +7,42 @@ export class APIError extends Error {
   }
 }
 
+// Global error handler for 403 errors
+let globalErrorHandler: ((error: APIError) => void) | null = null
+
+export function setGlobalErrorHandler(handler: (error: APIError) => void) {
+  globalErrorHandler = handler
+}
+
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`
 
+  // Add X-Act-As header if acting as another user
+  const actAsEmail = localStorage.getItem('actAsEmail')
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...options?.headers,
+  }
+
+  if (actAsEmail) {
+    headers['X-Act-As'] = actAsEmail
+  }
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   })
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }))
-    throw new APIError(response.status, error.detail || error.message || 'Request failed')
+    const apiError = new APIError(response.status, error.detail || error.message || 'Request failed')
+
+    // Call global error handler for 403 errors
+    if (response.status === 403 && globalErrorHandler) {
+      globalErrorHandler(apiError)
+    }
+
+    throw apiError
   }
 
   return response.json()

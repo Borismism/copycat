@@ -272,6 +272,7 @@ class UserRole(str, Enum):
     EDITOR = "editor"  # Start scans, edit configs, manage channels
     LEGAL = "legal"  # Edit legal fields (action_status, notes, enforcement)
     READ = "read"  # View-only access
+    BLOCKED = "blocked"  # No access - must be explicitly granted a role
 
 
 class RoleAssignment(BaseModel):

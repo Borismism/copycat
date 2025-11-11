@@ -86,7 +86,9 @@ async def trigger_discovery_stream(max_quota: int = 1000, user: UserInfo = Depen
 
 
 @router.get("/quota", response_model=QuotaStatus)
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
 async def get_quota_status(
+    user: UserInfo = Depends(get_current_user),
     firestore_client: FirestoreClient = Depends(get_firestore_client),
 ):
     """
@@ -132,7 +134,8 @@ async def get_quota_status(
 
 
 @router.get("/analytics", response_model=DiscoveryAnalytics)
-async def get_discovery_analytics():
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_discovery_analytics(user: UserInfo = Depends(get_current_user)):
     """Get discovery performance analytics."""
     try:
         analytics_data = await discovery_client.get_analytics()
@@ -205,7 +208,9 @@ async def scan_channel(channel_id: str, max_videos: int = 50, user: UserInfo = D
 
 
 @router.get("/history")
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
 async def get_discovery_history(
+    user: UserInfo = Depends(get_current_user),
     limit: int = 20,
     offset: int = 0,
     firestore_client: FirestoreClient = Depends(get_firestore_client),

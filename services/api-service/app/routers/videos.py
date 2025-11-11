@@ -7,7 +7,7 @@ from datetime import UTC
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.core.firestore_client import firestore_client
 from app.models import UserInfo, UserRole, VideoListResponse, VideoMetadata, VideoStatus
@@ -29,7 +29,9 @@ def get_publisher():
 
 
 @router.get("", response_model=VideoListResponse)
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
 async def list_videos(
+    user: UserInfo = Depends(get_current_user),
     status: VideoStatus | None = Query(None, description="Filter by video status"),
     has_ip_match: bool | None = Query(None, description="Filter by IP match presence"),
     channel_id: str | None = Query(None, description="Filter by channel ID"),
@@ -76,7 +78,8 @@ async def list_videos(
 
 
 @router.get("/processing/list")
-async def list_processing_videos():
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def list_processing_videos(user: UserInfo = Depends(get_current_user)):
     """
     Get all currently processing videos (OPTIMIZED).
 
@@ -116,7 +119,8 @@ async def list_processing_videos():
 
 
 @router.get("/{video_id}", response_model=VideoMetadata)
-async def get_video(video_id: str):
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_video(video_id: str, user: UserInfo = Depends(get_current_user)):
     """Get detailed video metadata."""
     try:
         video = await firestore_client.get_video(video_id)

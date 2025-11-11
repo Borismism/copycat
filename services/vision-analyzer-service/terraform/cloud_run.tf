@@ -15,7 +15,14 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
       max_instance_count = var.max_concurrent_videos # Limit concurrent videos to control costs
     }
 
-    timeout = "${var.timeout_seconds}s" # Long timeout for video analysis
+    timeout = "${var.timeout_seconds}s" # Long timeout for video analysis (20 minutes)
+
+    # Note: During deployments, Cloud Run sends SIGTERM to old instances
+    # Our signal handler (main.py) will:
+    # 1. Reject new requests (return 503)
+    # 2. Wait for active processing to complete
+    # 3. Exit gracefully when done
+    # Cloud Run respects the timeout above before sending SIGKILL
 
     containers {
       image = var.image_name

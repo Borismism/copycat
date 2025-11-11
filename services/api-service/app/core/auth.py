@@ -99,7 +99,7 @@ async def get_user_role(email: str) -> UserRole:
     Role resolution order:
     1. Exact email match
     2. Domain match (e.g., @nextnovate.com)
-    3. Default: READ role
+    3. Default: BLOCKED (no access - must be explicitly granted a role)
 
     Args:
         email: User email address
@@ -138,8 +138,8 @@ async def get_user_role(email: str) -> UserRole:
         _role_cache[email] = (role, now)
         return role
 
-    # 3. Default to READ role
-    role = UserRole.READ
+    # 3. Default to BLOCKED (no access)
+    role = UserRole.BLOCKED
     _role_cache[email] = (role, now)
     return role
 
@@ -211,6 +211,13 @@ def require_role(*allowed_roles: UserRole):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Authentication required",
+                )
+
+            # Explicitly block users with BLOCKED role
+            if user.role == UserRole.BLOCKED:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied. Your account has not been granted access to this application. Please contact an administrator.",
                 )
 
             if user.role not in allowed_roles:

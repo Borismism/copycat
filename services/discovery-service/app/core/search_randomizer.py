@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, UTC
 from enum import Enum
 
+from google.cloud import firestore
+
 from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
@@ -457,18 +459,28 @@ class SearchRandomizer:
         try:
             from datetime import timedelta
 
-            # Query ALL videos to find most active channels
-            videos_query = self.firestore.collection("videos").stream()
+            # Query channels collection (much more efficient than scanning all videos)
+            # Sort by video_count descending to prioritize active channels
+            channels_query = (
+                self.firestore.collection("channels")
+                .order_by("video_count", direction=firestore.Query.DESCENDING)
+                .limit(100)  # Get top 100 most active channels
+                .stream()
+            )
 
-            # Count videos per channel
-            channel_video_counts = {}
-            for video in videos_query:
-                data = video.to_dict()
+            # Build list of all channels
+            all_channels = []
+            for doc in channels_query:
+                data = doc.to_dict()
                 channel_id = data.get("channel_id")
-                if channel_id:
-                    channel_video_counts[channel_id] = channel_video_counts.get(channel_id, 0) + 1
+                video_count = data.get("video_count", 0)
+                if channel_id and video_count > 0:
+                    all_channels.append({
+                        "channel_id": channel_id,
+                        "video_count": video_count,
+                    })
 
-            if not channel_video_counts:
+            if not all_channels:
                 logger.info("📺 No channels found yet")
                 return []
 
@@ -487,7 +499,8 @@ class SearchRandomizer:
             min_scan_interval = timedelta(days=7)
             channels_to_scan = []
 
-            for channel_id, video_count in channel_video_counts.items():
+            for channel in all_channels:
+                channel_id = channel["channel_id"]
                 last_scanned = scan_history.get(channel_id)
 
                 # Skip if scanned recently
@@ -500,18 +513,13 @@ class SearchRandomizer:
                         logger.debug(f"  ⏭️  Skipping {channel_id}: scanned {time_since_scan.days}d ago")
                         continue
 
-                channels_to_scan.append({
-                    "channel_id": channel_id,
-                    "video_count": video_count,
-                })
+                channels_to_scan.append(channel)
 
-            # Sort by video count (descending) - most active channels first
-            channels_to_scan.sort(key=lambda x: x["video_count"], reverse=True)
-
+            # Already sorted by video_count from Firestore query
             # Take top N
             top_channels = channels_to_scan[:max_channels]
 
-            logger.info(f"📺 Selected {len(top_channels)} channels to scan (from {len(channel_video_counts)} total channels)")
+            logger.info(f"📺 Selected {len(top_channels)} channels to scan (from {len(all_channels)} total channels)")
             for ch in top_channels[:5]:  # Log top 5
                 logger.info(f"  📺 {ch['channel_id']}: {ch['video_count']} videos")
 

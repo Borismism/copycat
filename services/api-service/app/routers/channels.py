@@ -4,7 +4,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.core.firestore_client import firestore_client
 from app.models import ChannelListResponse, ChannelProfile, ChannelStats, ChannelTier, UserInfo, UserRole, VideoStatus
@@ -25,7 +25,9 @@ def get_publisher():
 
 
 @router.get("", response_model=ChannelListResponse)
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
 async def list_channels(
+    user: UserInfo = Depends(get_current_user),
     min_risk: int | None = Query(None, ge=0, le=100, description="Minimum risk score filter"),
     tier: ChannelTier | None = Query(None, description="Filter by channel tier"),
     action_status: str | None = Query(None, description="Filter by action status"),
@@ -73,7 +75,8 @@ async def list_channels(
 
 
 @router.get("/stats", response_model=ChannelStats)
-async def get_channel_statistics():
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_channel_statistics(user: UserInfo = Depends(get_current_user)):
     """Get channel tier distribution statistics."""
     try:
         return await firestore_client.get_channel_stats()
@@ -82,7 +85,9 @@ async def get_channel_statistics():
 
 
 @router.get("/scan-history-with-processing")
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
 async def get_scan_history_with_processing(
+    user: UserInfo = Depends(get_current_user),
     limit: int = 50,
     cursor: str | None = None
 ):
@@ -286,7 +291,8 @@ async def get_scan_history_with_processing(
 
 
 @router.get("/scan-history")
-async def get_scan_history(limit: int = 50, offset: int = 0):
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_scan_history(user: UserInfo = Depends(get_current_user), limit: int = 50, offset: int = 0):
     """
     Get recent scan history with smart grouping by video_id.
 
@@ -391,7 +397,8 @@ async def get_scan_history(limit: int = 50, offset: int = 0):
 
 
 @router.get("/{channel_id}", response_model=ChannelProfile)
-async def get_channel(channel_id: str):
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def get_channel(channel_id: str, user: UserInfo = Depends(get_current_user)):
     """Get detailed channel profile."""
     try:
         channel = await firestore_client.get_channel(channel_id)
