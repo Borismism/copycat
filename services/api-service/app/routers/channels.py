@@ -367,8 +367,10 @@ async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
                             # Check if completed recently
                             if completed_at:
                                 if isinstance(completed_at, datetime):
-                                    completed_time = completed_at
+                                    # Make timezone-naive for comparison
+                                    completed_time = completed_at.replace(tzinfo=None) if completed_at.tzinfo else completed_at
                                 elif hasattr(completed_at, 'seconds'):
+                                    # Firestore timestamp - always timezone-naive
                                     completed_time = datetime.fromtimestamp(completed_at.seconds)
                                 else:
                                     continue
