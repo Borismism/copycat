@@ -40,7 +40,7 @@ variable "image_name" {
 variable "min_instances" {
   description = "Minimum number of instances"
   type        = number
-  default     = 0
+  default     = 1  # Keep at least 1 instance alive to prevent autoscaler killing active work
 }
 
 variable "max_instances" {
@@ -66,13 +66,13 @@ variable "memory" {
 variable "timeout_seconds" {
   description = "Request timeout in seconds"
   type        = number
-  default     = 1200  # 20 minutes for heavy load scenarios
+  default     = 1800  # 30 minutes - workers process videos in background, need long timeout
 }
 
 variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
-  default     = 80 # High concurrency since we use background tasks (requests return immediately)
+  default     = 500 # Very high concurrency - requests return immediately, workers handle actual processing
 }
 
 # Budget configuration

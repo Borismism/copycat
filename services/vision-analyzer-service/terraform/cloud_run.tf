@@ -32,7 +32,7 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
           cpu    = var.cpu
           memory = var.memory
         }
-        cpu_idle = true
+        cpu_idle = false  # Always allocate CPU - workers wait on Gemini API, autoscaler shouldn't kill them
       }
 
       ports {

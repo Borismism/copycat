@@ -191,6 +191,15 @@ async def analyze_video(request: Request):
             detail="Service is shutting down - message will be retried on new instance"
         )
 
+    # CRITICAL: Reject new work if queue is too full (reserve 10 slots for other requests)
+    # Concurrency is 500, so reject PubSub when queue > 490
+    if main_module.analysis_queue and main_module.analysis_queue.qsize() > 490:
+        logger.warning(f"⚠️  Rejecting new request - queue overloaded ({main_module.analysis_queue.qsize()} items)")
+        raise HTTPException(
+            status_code=503,
+            detail="Queue full - message will be retried"
+        )
+
     if not video_analyzer or not budget_manager or not config_loader:
         logger.error("Service components not initialized")
         raise HTTPException(status_code=503, detail="Service not ready")
