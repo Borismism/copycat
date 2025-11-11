@@ -129,12 +129,12 @@ export default function VisionAnalyzerPage() {
     loadHistory(null, false)
   }, [])
 
-  // Auto-refresh every 5 seconds to show current running scans
+  // Auto-refresh every 2 seconds to show current running scans (REAL-TIME!)
   useEffect(() => {
     const interval = setInterval(() => {
       // Reload the first page to get latest scans (with refresh flag)
       loadHistory(null, true)
-    }, 5000)
+    }, 2000) // 2 seconds for near real-time updates
 
     return () => clearInterval(interval)
   }, [loadHistory])
