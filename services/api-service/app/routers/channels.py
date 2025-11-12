@@ -406,7 +406,7 @@ async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
                     processing_videos = []
                     processing_query = (
                         firestore_client.videos_collection
-                        .where("status", "in", ["pending", "processing"])
+                        .where("status", "==", "processing")
                         .where("matched_ips", "!=", [])
                         .order_by("scan_priority", direction=fs.Query.DESCENDING)
                         .limit(10)
