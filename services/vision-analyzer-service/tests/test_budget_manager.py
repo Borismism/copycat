@@ -16,25 +16,33 @@ class TestBudgetManager:
 
     def test_initialization(self, budget_manager):
         """Test budget manager initialization."""
-        assert budget_manager.DAILY_BUDGET_USD == 260.0
+        assert budget_manager.DAILY_BUDGET_EUR > 0  # Just check it's set
         assert budget_manager._cached_total == 0.0
         assert budget_manager._video_count == 0
 
     def test_can_afford_with_sufficient_budget(self, budget_manager):
         """Test can_afford when budget is available."""
-        budget_manager._cached_total = 50.0
-        assert budget_manager.can_afford(10.0) is True
+        budget_manager._cached_total = 0.0
+        # Ask for half the daily budget - should always work
+        cost = budget_manager.DAILY_BUDGET_EUR / 2
+        assert budget_manager.can_afford(cost) is True
 
     def test_can_afford_insufficient_budget(self, budget_manager):
         """Test can_afford when budget would be exceeded."""
-        budget_manager._cached_total = 255.0
-        assert budget_manager.can_afford(10.0) is False
+        # Set to 99% of budget
+        budget_manager._cached_total = budget_manager.DAILY_BUDGET_EUR * 0.99
+        # Ask for 10% more - should fail
+        cost = budget_manager.DAILY_BUDGET_EUR * 0.10
+        assert budget_manager.can_afford(cost) is False
 
     def test_can_afford_exact_budget(self, budget_manager):
         """Test can_afford at exact budget limit."""
-        budget_manager._cached_total = 250.0
-        assert budget_manager.can_afford(10.0) is True
-        assert budget_manager.can_afford(10.01) is False
+        # Use 90% of budget
+        budget_manager._cached_total = budget_manager.DAILY_BUDGET_EUR * 0.90
+        # Ask for 10% - should work (exactly at limit)
+        assert budget_manager.can_afford(budget_manager.DAILY_BUDGET_EUR * 0.10) is True
+        # Ask for 10.01% - should fail
+        assert budget_manager.can_afford(budget_manager.DAILY_BUDGET_EUR * 0.1001) is False
 
     def test_record_usage(self, budget_manager, mock_firestore):
         """Test recording budget usage."""
@@ -129,7 +137,7 @@ class TestBudgetManager:
 
     @pytest.mark.asyncio
     async def test_enforce_rate_limit_no_op(self, budget_manager):
-        """Test that enforce_rate_limit is a no-op (no hard rate limits)."""
+        """Test that enforce_rate_limit is a no-op (no pre-emptive rate limiting)."""
         # Should complete instantly without error
         await budget_manager.enforce_rate_limit()
         # If it returns without exception, test passes

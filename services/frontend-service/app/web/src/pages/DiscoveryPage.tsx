@@ -52,7 +52,7 @@ export default function DiscoveryPage() {
     )
   }
 
-  // Load discovery history
+  // Load discovery history (initial load only)
   const loadHistory = useCallback(async (offset: number = 0, isRefresh: boolean = false) => {
     if (historyLoading) return
     setHistoryLoading(true)
@@ -86,14 +86,88 @@ export default function DiscoveryPage() {
     } finally {
       setHistoryLoading(false)
     }
-  }, [historyLimit])  // Remove historyLoading from deps
+  }, [historyLimit])
 
-  // Initial history load and auto-refresh
+  // Initial history load (once)
   useEffect(() => {
     loadHistory(0, false)
-    const interval = setInterval(() => loadHistory(0, true), 10000)
-    return () => clearInterval(interval)
-  }, [])  // Empty deps - only run once on mount
+  }, [loadHistory])
+
+  // SSE connection for real-time updates (no more auto-refresh!)
+  useEffect(() => {
+    const eventSource = new EventSource('/api/discovery/history/updates-stream')
+
+    eventSource.addEventListener('connected', () => {
+      console.log('[SSE] Connected to discovery updates stream')
+    })
+
+    eventSource.addEventListener('discovery_updated', (event) => {
+      const run = JSON.parse(event.data)
+      // Update existing run or add new one
+      setHistory(prev => {
+        const existingIndex = prev.findIndex(r => r.run_id === run.run_id)
+        if (existingIndex >= 0) {
+          // Update existing run
+          const updated = [...prev]
+          updated[existingIndex] = { ...updated[existingIndex], ...run }
+          return updated
+        } else {
+          // Add new run at the top
+          return [run, ...prev]
+        }
+      })
+    })
+
+    eventSource.addEventListener('discovery_completed', (event) => {
+      const run = JSON.parse(event.data)
+      // Update run status to completed
+      setHistory(prev => {
+        const existingIndex = prev.findIndex(r => r.run_id === run.run_id)
+        if (existingIndex >= 0) {
+          const updated = [...prev]
+          updated[existingIndex] = { ...updated[existingIndex], ...run, status: 'completed' }
+          return updated
+        } else {
+          // Add completed run at top if not exists
+          return [run, ...prev]
+        }
+      })
+    })
+
+    eventSource.addEventListener('discovery_failed', (event) => {
+      const run = JSON.parse(event.data)
+      // Update run status to failed
+      setHistory(prev => {
+        const existingIndex = prev.findIndex(r => r.run_id === run.run_id)
+        if (existingIndex >= 0) {
+          const updated = [...prev]
+          updated[existingIndex] = { ...updated[existingIndex], ...run, status: 'failed' }
+          return updated
+        } else {
+          // Add failed run at top if not exists
+          return [run, ...prev]
+        }
+      })
+    })
+
+    eventSource.addEventListener('heartbeat', () => {
+      // Keep-alive, no action needed
+    })
+
+    eventSource.addEventListener('error', (event) => {
+      console.error('[SSE] Error:', event)
+    })
+
+    eventSource.onerror = () => {
+      console.error('[SSE] Connection error, will reconnect...')
+      // EventSource automatically reconnects
+    }
+
+    return () => {
+      console.log('[SSE] Disconnecting from discovery updates stream')
+      eventSource.close()
+    }
+  }, [])  // Empty deps - runs once
 
   // Infinite scroll observer for history
   useEffect(() => {
@@ -503,13 +577,13 @@ export default function DiscoveryPage() {
           <div>
             <h3 className="text-xl font-bold text-gray-900">Discovery History</h3>
             <p className="text-gray-600 text-sm">
-              {history.filter(r => r.status === 'running').length} running
+              {history.filter(r => r.status === 'running').length} running, {history.filter(r => r.status === 'failed').length} failed, {history.filter(r => r.status === 'completed').length} completed
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              Auto-updating every 10s
+              Live updates via SSE
             </div>
           </div>
         </div>

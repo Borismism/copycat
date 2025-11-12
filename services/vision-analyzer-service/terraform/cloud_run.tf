@@ -15,14 +15,7 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
       max_instance_count = var.max_concurrent_videos # Limit concurrent videos to control costs
     }
 
-    timeout = "${var.timeout_seconds}s" # Long timeout for video analysis (20 minutes)
-
-    # Note: During deployments, Cloud Run sends SIGTERM to old instances
-    # Our signal handler (main.py) will:
-    # 1. Reject new requests (return 503)
-    # 2. Wait for active processing to complete
-    # 3. Exit gracefully when done
-    # Cloud Run respects the timeout above before sending SIGKILL
+    timeout = "${var.timeout_seconds}s" # 1 hour timeout for synchronous video processing
 
     containers {
       image = var.image_name
@@ -32,7 +25,7 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
           cpu    = var.cpu
           memory = var.memory
         }
-        cpu_idle = false  # Always allocate CPU - workers wait on Gemini API, autoscaler shouldn't kill them
+        cpu_idle = false  # Always allocate CPU - async requests wait on Gemini API
       }
 
       ports {
@@ -130,8 +123,7 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
         value = local.app_source_hash
       }
 
-      # Health check probes removed - long-running Gemini video analysis jobs can't respond to probes
-      # and get killed prematurely. Cloud Run will monitor port availability instead.
+      # Health check: FastAPI /health endpoint responds even during long-running async analysis
     }
 
     max_instance_request_concurrency = var.concurrency

@@ -1,5 +1,7 @@
 """Discovery service endpoints."""
 
+import asyncio
+import json
 from datetime import datetime
 
 import httpx
@@ -251,3 +253,124 @@ async def get_discovery_history(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch discovery history: {e!s}")
+
+
+@router.get("/history/updates-stream")
+@require_role(UserRole.READ, UserRole.LEGAL, UserRole.EDITOR, UserRole.ADMIN)
+async def discovery_updates_stream(user: UserInfo = Depends(get_current_user), firestore_client: FirestoreClient = Depends(get_firestore_client)):
+    """
+    SSE (Server-Sent Events) stream for real-time discovery run updates.
+
+    Streams discovery status changes for running and recently completed runs.
+    Frontend should use this instead of polling.
+
+    Event types:
+    - discovery_started: New discovery run has started
+    - discovery_updated: Run status changed (running -> completed/failed)
+    - discovery_completed: Run finished successfully
+    - discovery_failed: Run failed with error
+    - heartbeat: Keep-alive ping every 15s
+    """
+    async def event_generator():
+        """Generate SSE events from Firestore snapshots."""
+        from google.cloud import firestore as fs
+        from datetime import timezone
+
+        try:
+            # Track last seen timestamps to avoid duplicates (timezone-aware)
+            last_check = datetime.now(timezone.utc)
+
+            # Send initial connection event
+            yield f"event: connected\ndata: {json.dumps({'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
+
+            while True:
+                try:
+                    # Query for recent discovery runs (last 30 seconds)
+                    current_time = datetime.now(timezone.utc)
+                    time_window = (current_time - last_check).total_seconds()
+
+                    # Get running runs and recently completed/failed runs
+                    recent_runs = []
+
+                    # Running discovery runs
+                    running_query = (
+                        firestore_client.db.collection("discovery_history")
+                        .where("status", "==", "running")
+                        .order_by("started_at", direction=fs.Query.DESCENDING)
+                        .limit(20)
+                        .stream()
+                    )
+
+                    for doc in running_query:
+                        data = doc.to_dict()
+                        data["run_id"] = doc.id
+                        recent_runs.append({
+                            "type": "discovery_updated",
+                            "run": data
+                        })
+
+                    # Recently completed runs (last 30s)
+                    if time_window > 0:
+                        completed_query = (
+                            firestore_client.db.collection("discovery_history")
+                            .where("status", "in", ["completed", "failed"])
+                            .order_by("completed_at", direction=fs.Query.DESCENDING)
+                            .limit(10)
+                            .stream()
+                        )
+
+                        for doc in completed_query:
+                            data = doc.to_dict()
+                            completed_at = data.get("completed_at")
+
+                            # Check if completed recently
+                            if completed_at:
+                                # Convert Firestore timestamp to timezone-aware datetime
+                                if isinstance(completed_at, datetime):
+                                    completed_time = completed_at.replace(tzinfo=timezone.utc) if completed_at.tzinfo is None else completed_at
+                                elif hasattr(completed_at, 'seconds'):
+                                    completed_time = datetime.fromtimestamp(completed_at.seconds, tz=timezone.utc)
+                                else:
+                                    continue
+
+                                # Only send if completed after last check
+                                if completed_time > last_check:
+                                    data["run_id"] = doc.id
+                                    event_type = "discovery_completed" if data["status"] == "completed" else "discovery_failed"
+                                    recent_runs.append({
+                                        "type": event_type,
+                                        "run": data
+                                    })
+
+                    # Send events for each run
+                    for item in recent_runs:
+                        event_type = item["type"]
+                        run_data = item["run"]
+                        yield f"event: {event_type}\ndata: {json.dumps(run_data, default=str)}\n\n"
+
+                    last_check = current_time
+
+                    # Send heartbeat
+                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': current_time.isoformat()})}\n\n"
+
+                    # Wait 2 seconds before next check
+                    await asyncio.sleep(2)
+
+                except Exception as e:
+                    # Log error but continue streaming
+                    yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+                    await asyncio.sleep(5)
+
+        except Exception as e:
+            # Fatal error - close stream
+            yield f"event: error\ndata: {json.dumps({'error': f'Stream failed: {str(e)}'})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )

@@ -386,7 +386,7 @@ async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
 
                     # Send events
                     for event in recent_scans:
-                        event_data = json.dumps(event["scan"])
+                        event_data = json.dumps(event["scan"], default=str)
                         yield f"event: {event['type']}\ndata: {event_data}\n\n"
 
                     # Get processing videos

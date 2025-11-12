@@ -1,7 +1,7 @@
 """Tests for prompt_builder.py"""
 
 import pytest
-from app.core.prompt_builder import PromptBuilder, JUSTICE_LEAGUE_CHARACTERS
+from app.core.prompt_builder import PromptBuilder
 
 
 class TestPromptBuilder:

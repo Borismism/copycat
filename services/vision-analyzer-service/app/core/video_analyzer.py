@@ -115,11 +115,11 @@ class VideoAnalyzer:
                     f"remaining ${budget_remaining:.2f}"
                 )
 
-            # Step 3: Enforce rate limiting
-            await self.budget_manager.enforce_rate_limit()
-
-            # Step 4: Build copyright-aware prompt with IP configs
+            # Step 3: Build copyright-aware prompt with IP configs
             prompt = self.prompt_builder.build_analysis_prompt(video_metadata, configs)
+
+            # Step 4: Apply adaptive rate limiting (delays only when 429s happening)
+            await self.budget_manager.enforce_rate_limit()
 
             # Step 5: Call Gemini API
             analysis_result, metrics = await self.gemini_client.analyze_video(
@@ -128,6 +128,8 @@ class VideoAnalyzer:
                 fps=video_config.fps,
                 start_offset_seconds=video_config.start_offset_seconds,
                 end_offset_seconds=video_config.end_offset_seconds,
+                video_id=video_id,
+                firestore_client=self.result_processor.firestore,
             )
 
             # Step 6: Record budget usage

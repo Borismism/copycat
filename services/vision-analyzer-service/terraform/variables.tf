@@ -40,7 +40,7 @@ variable "image_name" {
 variable "min_instances" {
   description = "Minimum number of instances"
   type        = number
-  default     = 1  # Keep at least 1 instance alive to prevent autoscaler killing active work
+  default     = 0  # Scale to zero when idle - synchronous processing keeps connections alive
 }
 
 variable "max_instances" {
@@ -66,13 +66,13 @@ variable "memory" {
 variable "timeout_seconds" {
   description = "Request timeout in seconds"
   type        = number
-  default     = 1800  # 30 minutes - workers process videos in background, need long timeout
+  default     = 3600  # 1 hour - synchronous processing in request keeps connection alive
 }
 
 variable "concurrency" {
   description = "Maximum concurrent requests per instance"
   type        = number
-  default     = 500 # Very high concurrency - requests return immediately, workers handle actual processing
+  default     = 500 # High concurrency - synchronous async processing (490 for PubSub, 10 for health checks)
 }
 
 # Budget configuration

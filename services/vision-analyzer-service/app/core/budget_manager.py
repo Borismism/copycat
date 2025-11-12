@@ -182,12 +182,11 @@ class BudgetManager:
 
     async def enforce_rate_limit(self):
         """
-        No-op for Vertex AI DSQ (no hard rate limits).
+        No-op for Vertex AI (no pre-emptive rate limiting).
 
-        Kept for API compatibility but does nothing.
-        Vertex AI Dynamic Shared Quota scales automatically.
+        429 errors are handled by retry logic in GeminiClient with exponential backoff.
+        Tasks only fail if all retries exhaust.
         """
-        # No rate limiting needed with Vertex AI DSQ
         pass
 
     def reset_session(self):
