@@ -79,7 +79,7 @@ class TestBudgetManager:
         mock_doc = Mock()
         mock_doc.exists = True
         mock_doc.to_dict.return_value = {
-            "total_spent_usd": 75.5,
+            "total_spent_eur": 75.5,
             "video_count": 10,
         }
         mock_firestore.collection().document().get.return_value = mock_doc
@@ -100,15 +100,17 @@ class TestBudgetManager:
 
     def test_get_remaining_budget(self, budget_manager):
         """Test getting remaining budget."""
-        budget_manager._cached_total = 100.0
+        budget = budget_manager.DAILY_BUDGET_EUR
+        budget_manager._cached_total = budget * 0.5
         budget_manager._cached_date = budget_manager._get_today_key()
 
         remaining = budget_manager.get_remaining_budget()
-        assert remaining == 160.0  # 260 - 100
+        assert remaining == budget * 0.5
 
     def test_get_remaining_budget_zero(self, budget_manager):
         """Test remaining budget when budget is exhausted."""
-        budget_manager._cached_total = 270.0
+        budget = budget_manager.DAILY_BUDGET_EUR
+        budget_manager._cached_total = budget * 1.5
         budget_manager._cached_date = budget_manager._get_today_key()
 
         remaining = budget_manager.get_remaining_budget()
@@ -116,7 +118,8 @@ class TestBudgetManager:
 
     def test_get_utilization_percent(self, budget_manager):
         """Test budget utilization calculation."""
-        budget_manager._cached_total = 130.0  # 50% of 260
+        budget = budget_manager.DAILY_BUDGET_EUR
+        budget_manager._cached_total = budget * 0.5
         budget_manager._cached_date = budget_manager._get_today_key()
 
         utilization = budget_manager.get_utilization_percent()
@@ -124,7 +127,8 @@ class TestBudgetManager:
 
     def test_get_utilization_percent_over_100(self, budget_manager):
         """Test utilization caps at 100%."""
-        budget_manager._cached_total = 300.0
+        budget = budget_manager.DAILY_BUDGET_EUR
+        budget_manager._cached_total = budget * 1.5
         budget_manager._cached_date = budget_manager._get_today_key()
 
         utilization = budget_manager.get_utilization_percent()
@@ -155,7 +159,7 @@ class TestBudgetManager:
         mock_doc = Mock()
         mock_doc.exists = True
         mock_doc.to_dict.return_value = {
-            "total_spent_usd": 50.0,
+            "total_spent_eur": 50.0,
             "video_count": 15,
         }
         mock_firestore.collection().document().get.return_value = mock_doc
@@ -168,18 +172,19 @@ class TestBudgetManager:
 
     def test_get_stats(self, budget_manager):
         """Test getting budget statistics."""
-        budget_manager._cached_total = 100.0
+        budget = budget_manager.DAILY_BUDGET_EUR
+        budget_manager._cached_total = budget * 0.5
         budget_manager._video_count = 20
         budget_manager._cached_date = budget_manager._get_today_key()
 
         stats = budget_manager.get_stats()
 
-        assert stats["daily_budget_usd"] == 260.0
-        assert stats["total_spent_usd"] == 100.0
-        assert stats["remaining_usd"] == 160.0
-        assert stats["utilization_percent"] == 38.5  # 100/260 * 100
+        assert stats["daily_budget_eur"] == budget
+        assert stats["total_spent_eur"] == round(budget * 0.5, 2)
+        assert stats["remaining_eur"] == round(budget * 0.5, 2)
+        assert stats["utilization_percent"] == 50.0
         assert stats["videos_analyzed"] == 20
-        assert stats["avg_cost_per_video"] == 5.0  # 100/20
+        assert stats["avg_cost_per_video"] == round(budget * 0.5 / 20, 4)
 
     def test_get_stats_no_videos(self, budget_manager):
         """Test stats when no videos analyzed."""
