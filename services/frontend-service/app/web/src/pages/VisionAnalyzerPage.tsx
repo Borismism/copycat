@@ -129,93 +129,136 @@ export default function VisionAnalyzerPage() {
     loadHistory(null, false)
   }, [])
 
-  // SSE connection for real-time updates (no more auto-refresh!)
+  // SSE connection for real-time updates with improved reconnection logic
   useEffect(() => {
-    const eventSource = new EventSource('/api/channels/scan-updates-stream')
+    let eventSource: EventSource | null = null
+    let reconnectAttempts = 0
+    let reconnectTimeout: NodeJS.Timeout | null = null
+    let isIntentionallyClosed = false
 
-    eventSource.addEventListener('connected', () => {
-      console.log('[SSE] Connected to scan updates stream')
-    })
+    const connect = () => {
+      if (isIntentionallyClosed) return
 
-    eventSource.addEventListener('scan_updated', (event) => {
-      const scan = JSON.parse(event.data)
-      // Update existing scan or add new one
-      setScans(prev => {
-        const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
-        if (existingIndex >= 0) {
-          // Update existing scan
-          const updated = [...prev]
-          updated[existingIndex] = { ...updated[existingIndex], ...scan }
-          return updated
-        } else {
-          // Add new scan at the top (only if status filter matches)
-          if (statusFilter === 'all' || scan.status === statusFilter) {
-            return [scan, ...prev]
-          }
-          return prev
-        }
+      eventSource = new EventSource('/api/channels/scan-updates-stream')
+
+      eventSource.addEventListener('connected', () => {
+        console.log('[SSE] Connected to scan updates stream')
+        reconnectAttempts = 0 // Reset on successful connection
       })
-    })
 
-    eventSource.addEventListener('scan_completed', (event) => {
-      const scan = JSON.parse(event.data)
-      // Update scan status to completed
-      setScans(prev => {
-        const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
-        if (existingIndex >= 0) {
-          const updated = [...prev]
-          updated[existingIndex] = { ...updated[existingIndex], ...scan, status: 'completed' }
-          return updated
-        } else {
-          // Add completed scan at top if not exists
-          if (statusFilter === 'all' || statusFilter === 'completed') {
-            return [scan, ...prev]
-          }
-          return prev
-        }
+      eventSource.addEventListener('shutdown', () => {
+        console.log('[SSE] Server shutting down gracefully')
+        isIntentionallyClosed = true
+        eventSource?.close()
+        // Show user notification about server shutdown
+        console.warn('[SSE] Server is shutting down, SSE updates will stop')
       })
-    })
 
-    eventSource.addEventListener('scan_failed', (event) => {
-      const scan = JSON.parse(event.data)
-      // Update scan status to failed
-      setScans(prev => {
-        const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
-        if (existingIndex >= 0) {
-          const updated = [...prev]
-          updated[existingIndex] = { ...updated[existingIndex], ...scan, status: 'failed' }
-          return updated
-        } else {
-          // Add failed scan at top if not exists
-          if (statusFilter === 'all' || statusFilter === 'failed') {
-            return [scan, ...prev]
+      eventSource.addEventListener('scan_updated', (event) => {
+        const scan = JSON.parse(event.data)
+        // Update existing scan or add new one
+        setScans(prev => {
+          const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
+          if (existingIndex >= 0) {
+            // Update existing scan
+            const updated = [...prev]
+            updated[existingIndex] = { ...updated[existingIndex], ...scan }
+            return updated
+          } else {
+            // Add new scan at the top (only if status filter matches)
+            if (statusFilter === 'all' || scan.status === statusFilter) {
+              return [scan, ...prev]
+            }
+            return prev
           }
-          return prev
-        }
+        })
       })
-    })
 
-    eventSource.addEventListener('processing_videos', (event) => {
-      const videos = JSON.parse(event.data)
-      setProcessingVideos(videos)
-    })
+      eventSource.addEventListener('scan_completed', (event) => {
+        const scan = JSON.parse(event.data)
+        // Update scan status to completed
+        setScans(prev => {
+          const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
+          if (existingIndex >= 0) {
+            const updated = [...prev]
+            updated[existingIndex] = { ...updated[existingIndex], ...scan, status: 'completed' }
+            return updated
+          } else {
+            // Add completed scan at top if not exists
+            if (statusFilter === 'all' || statusFilter === 'completed') {
+              return [scan, ...prev]
+            }
+            return prev
+          }
+        })
+      })
 
-    eventSource.addEventListener('heartbeat', () => {
-      // Keep-alive, no action needed
-    })
+      eventSource.addEventListener('scan_failed', (event) => {
+        const scan = JSON.parse(event.data)
+        // Update scan status to failed
+        setScans(prev => {
+          const existingIndex = prev.findIndex(s => s.scan_id === scan.scan_id)
+          if (existingIndex >= 0) {
+            const updated = [...prev]
+            updated[existingIndex] = { ...updated[existingIndex], ...scan, status: 'failed' }
+            return updated
+          } else {
+            // Add failed scan at top if not exists
+            if (statusFilter === 'all' || statusFilter === 'failed') {
+              return [scan, ...prev]
+            }
+            return prev
+          }
+        })
+      })
 
-    eventSource.addEventListener('error', (event) => {
-      console.error('[SSE] Error:', event)
-    })
+      eventSource.addEventListener('processing_videos', (event) => {
+        const videos = JSON.parse(event.data)
+        setProcessingVideos(videos)
+      })
 
-    eventSource.onerror = () => {
-      console.error('[SSE] Connection error, will reconnect...')
-      // EventSource automatically reconnects
+      eventSource.addEventListener('heartbeat', () => {
+        // Keep-alive, no action needed
+      })
+
+      eventSource.addEventListener('error', (event) => {
+        console.error('[SSE] Error:', event)
+      })
+
+      eventSource.onerror = () => {
+        console.error('[SSE] Connection error')
+
+        // Don't reconnect if intentionally closed
+        if (isIntentionallyClosed) return
+
+        // Clean up current connection
+        eventSource?.close()
+
+        // Exponential backoff for reconnection
+        reconnectAttempts++
+        const delay = Math.min(30000, Math.pow(2, reconnectAttempts) * 1000) // Max 30 seconds
+
+        console.log(`[SSE] Reconnecting in ${delay / 1000} seconds (attempt ${reconnectAttempts})...`)
+
+        // Clear any existing timeout
+        if (reconnectTimeout) clearTimeout(reconnectTimeout)
+
+        // Schedule reconnection
+        reconnectTimeout = setTimeout(() => {
+          console.log('[SSE] Attempting to reconnect...')
+          connect()
+        }, delay)
+      }
     }
 
+    // Initial connection
+    connect()
+
     return () => {
-      console.log('[SSE] Disconnecting from scan updates stream')
-      eventSource.close()
+      console.log('[SSE] Cleaning up SSE connection')
+      isIntentionallyClosed = true
+      if (reconnectTimeout) clearTimeout(reconnectTimeout)
+      eventSource?.close()
     }
   }, [statusFilter])
 

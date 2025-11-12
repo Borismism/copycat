@@ -316,18 +316,31 @@ async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
     async def event_generator():
         """Generate SSE events from Firestore snapshots."""
         from google.cloud import firestore as fs
+        from datetime import timezone
+        import signal
+
+        shutdown_requested = False
+
+        def handle_shutdown(signum, frame):
+            nonlocal shutdown_requested
+            shutdown_requested = True
+            logger.info(f"SSE stream received shutdown signal {signum}")
+
+        # Register shutdown handlers
+        original_sigterm = signal.signal(signal.SIGTERM, handle_shutdown)
+        original_sigint = signal.signal(signal.SIGINT, handle_shutdown)
 
         try:
-            # Track last seen timestamps to avoid duplicates
-            last_check = datetime.utcnow()
+            # Track last seen timestamps to avoid duplicates (timezone-aware)
+            last_check = datetime.now(timezone.utc)
 
             # Send initial connection event
-            yield f"event: connected\ndata: {json.dumps({'timestamp': datetime.utcnow().isoformat()})}\n\n"
+            yield f"event: connected\ndata: {json.dumps({'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
 
-            while True:
+            while not shutdown_requested:
                 try:
                     # Query for recent scans (last 30 seconds)
-                    current_time = datetime.utcnow()
+                    current_time = datetime.now(timezone.utc)
                     time_window = (current_time - last_check).total_seconds()
 
                     # Get running scans and recently completed/failed scans
@@ -367,11 +380,11 @@ async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
                             # Check if completed recently
                             if completed_at:
                                 if isinstance(completed_at, datetime):
-                                    # Make timezone-naive for comparison
-                                    completed_time = completed_at.replace(tzinfo=None) if completed_at.tzinfo else completed_at
+                                    # Convert to timezone-aware for comparison
+                                    completed_time = completed_at.replace(tzinfo=timezone.utc) if completed_at.tzinfo is None else completed_at
                                 elif hasattr(completed_at, 'seconds'):
-                                    # Firestore timestamp - always timezone-naive
-                                    completed_time = datetime.fromtimestamp(completed_at.seconds)
+                                    # Firestore timestamp - convert to timezone-aware
+                                    completed_time = datetime.fromtimestamp(completed_at.seconds, tz=timezone.utc)
                                 else:
                                     continue
 
@@ -420,12 +433,17 @@ async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
                     await asyncio.sleep(5)
 
                     # Send heartbeat every iteration
-                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': datetime.utcnow().isoformat()})}\n\n"
+                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
 
                 except Exception as e:
                     logger.error(f"Error in SSE event loop: {e}")
                     yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
                     await asyncio.sleep(5)
+
+            # Send shutdown notification if requested
+            if shutdown_requested:
+                logger.info("Sending shutdown notification to SSE client")
+                yield f"event: shutdown\ndata: {json.dumps({'message': 'Server is shutting down gracefully', 'timestamp': datetime.now(timezone.utc).isoformat()})}\n\n"
 
         except asyncio.CancelledError:
             logger.info("SSE stream cancelled by client")
@@ -433,6 +451,10 @@ async def scan_updates_stream(user: UserInfo = Depends(get_current_user)):
         except Exception as e:
             logger.error(f"Fatal error in SSE stream: {e}")
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # Restore original signal handlers
+            signal.signal(signal.SIGTERM, original_sigterm)
+            signal.signal(signal.SIGINT, original_sigint)
 
     return StreamingResponse(
         event_generator(),
