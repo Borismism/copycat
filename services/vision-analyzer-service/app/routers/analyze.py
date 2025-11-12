@@ -361,6 +361,14 @@ async def analyze_video(request: Request):
                     media_type="application/json"
                 )
 
+            elif error_type == "ValueError" and "Invalid JSON" in error_str:
+                # Gemini returned malformed JSON - permanent failure (won't fix itself on retry)
+                video_status = "failed"
+                scan_status = "failed"
+                error_message = f"Gemini API returned invalid JSON: {error_str[:200]}"
+                logger.error(f"Video {video_id} failed due to Gemini JSON parse error")
+                response_code = 200  # Don't retry - Gemini bug won't fix itself
+
             else:
                 # Unknown error - return 500 for limited retry
                 logger.error(f"Unknown error for video {video_id}: {error_str[:200]}")

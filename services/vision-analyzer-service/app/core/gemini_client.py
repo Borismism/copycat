@@ -281,7 +281,10 @@ class GeminiClient:
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}")
-            logger.debug(f"Response text: {response_text}")
+            logger.error(f"Response text (first 500 chars): {response_text[:500] if response_text else 'None'}")
+            logger.error(f"Response text (last 500 chars): {response_text[-500:] if response_text and len(response_text) > 500 else ''}")
+            # NOTE: Gemini API occasionally returns truncated/malformed JSON with unterminated strings
+            # This is a known Gemini API bug, not our fault. Mark as permanent failure.
             raise ValueError(f"Invalid JSON response from Gemini: {e}")
 
         except Exception as e:
