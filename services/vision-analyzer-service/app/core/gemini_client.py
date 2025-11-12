@@ -41,34 +41,36 @@ class GeminiClient:
         self.location = settings.gemini_location
         self.model_name = settings.gemini_model
 
-        # Initialize client with Vertex AI
+        # Initialize async client with Vertex AI
         self.client = self._init_client()
 
         logger.info(
-            f"Gemini client initialized: model={self.model_name}, "
+            f"Gemini async client initialized: model={self.model_name}, "
             f"location={self.location}, project={self.project_id}"
         )
 
-    def _init_client(self) -> genai.Client:
+    def _init_client(self):
         """
-        Initialize Gemini client with Vertex AI authentication.
+        Initialize Gemini async client with Vertex AI authentication.
 
         Uses Application Default Credentials (service account in Cloud Run).
+        Returns async client via .aio property.
         """
         try:
             _credentials, project = default()
             logger.info(f"Using GCP project: {project}")
 
+            # Create async client using .aio property
             client = genai.Client(
                 vertexai=True,
                 project=self.project_id,
                 location=self.location,
-            )
+            ).aio
 
             return client
 
         except Exception as e:
-            logger.error(f"Failed to initialize Gemini client: {e}")
+            logger.error(f"Failed to initialize Gemini async client: {e}")
             raise
 
     async def analyze_video(
@@ -78,6 +80,8 @@ class GeminiClient:
         fps: float,
         start_offset_seconds: int,
         end_offset_seconds: int,
+        video_id: str = None,
+        firestore_client = None,
     ) -> tuple[GeminiAnalysisResult, AnalysisMetrics]:
         """
         Analyze a YouTube video for copyright infringement.
@@ -105,7 +109,8 @@ class GeminiClient:
 
             # Call Gemini 2.5 Flash
             response = await self._call_gemini_with_retry(
-                prompt, youtube_url, fps, start_offset_seconds, end_offset_seconds
+                prompt, youtube_url, fps, start_offset_seconds, end_offset_seconds,
+                video_id, firestore_client
             )
 
             # Parse JSON response
@@ -138,10 +143,12 @@ class GeminiClient:
         fps: float,
         start_offset: int,
         end_offset: int,
-        max_retries: int = 5,
+        video_id: str = None,
+        firestore_client = None,
+        max_retries: int = 8,
     ) -> Any:
         """
-        Call Gemini API with exponential backoff retry for rate limits.
+        Call Gemini API - no retry logic, let PubSub handle retries.
 
         Args:
             prompt: Analysis prompt
@@ -149,139 +156,88 @@ class GeminiClient:
             fps: Frames per second
             start_offset: Start offset in seconds
             end_offset: End offset in seconds
-            max_retries: Maximum retry attempts (default: 5)
 
         Returns:
             Gemini API response
 
         Raises:
-            Exception: If all retries fail
+            Exception: On any API error
         """
-        # Exponential backoff delays: 1s, 8s, 16s, 32s, 64s
-        backoff_delays = [1, 8, 16, 32, 64]
+        try:
+            # Use Part.from_uri for YouTube video (official SDK pattern)
+            from google.genai.types import Part
 
-        for attempt in range(max_retries):
+            # Build request with simplified content structure
+            # Using native async client for non-blocking API calls
             try:
-                # Use Part.from_uri for YouTube video (official SDK pattern)
-                from google.genai.types import Part
+                response = await asyncio.wait_for(
+                    self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=[
+                            Part.from_uri(
+                                file_uri=youtube_url,
+                                mime_type="video/mp4",  # YouTube videos are mp4
+                            ),
+                            prompt,  # Text prompt as string
+                        ],
+                        config={
+                            "temperature": settings.gemini_temperature,
+                            "max_output_tokens": settings.gemini_max_output_tokens,
+                            "response_mime_type": "application/json",  # Force JSON output
+                        },
+                    ),
+                    timeout=3000  # 50 minutes (CloudRun timeout is 1 hour)
+                )
+            except asyncio.TimeoutError:
+                # Gemini API call timed out after 50 minutes
+                logger.error(
+                    f"Gemini API call timed out after 3000 seconds for {youtube_url}. "
+                    "Video may be too long, inaccessible, or Gemini backend is having issues."
+                )
+                raise TimeoutError(
+                    "Gemini API call timed out after 50 minutes - video may be inaccessible or too complex"
+                )
 
-                # Build request with simplified content structure
-                # IMPORTANT: Run blocking Gemini API call in thread to avoid blocking event loop
-                # This ensures health checks can still respond during long video analysis
-                #
-                # Use asyncio.wait_for with asyncio.to_thread for proper async timeout handling
-                # The worker pool in main.py ensures proper parallelism
-                try:
-                    response = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            self.client.models.generate_content,
-                            model=self.model_name,
-                            contents=[
-                                Part.from_uri(
-                                    file_uri=youtube_url,
-                                    mime_type="video/mp4",  # YouTube videos are mp4
-                                ),
-                                prompt,  # Text prompt as string
-                            ],
-                            config={
-                                "temperature": settings.gemini_temperature,
-                                "max_output_tokens": settings.gemini_max_output_tokens,
-                                "response_mime_type": "application/json",  # Force JSON output
-                            },
-                        ),
-                        timeout=900  # 15 minutes
-                    )
-                except asyncio.TimeoutError:
-                    # Gemini API call timed out after 15 minutes
-                    logger.error(
-                        f"Gemini API call timed out after 900 seconds for {youtube_url}. "
-                        "Video may be too long, inaccessible, or Gemini backend is having issues."
-                    )
-                    raise TimeoutError(
-                        "Gemini API call timed out after 15 minutes - video may be inaccessible or too complex"
-                    )
+            # Fix None values in response before returning
+            try:
+                response_text = response.text
+                response_data = json.loads(response_text)
 
-                # Validate response has valid JSON before returning
-                try:
-                    response_text = response.text
-                    response_data = json.loads(response_text)
+                # Fix None values in critical boolean fields
+                if "ip_results" in response_data:
+                    for ip_result in response_data["ip_results"]:
+                        if ip_result.get("fair_use_applies") is None:
+                            ip_result["fair_use_applies"] = False
+                        if ip_result.get("is_ai_generated") is None:
+                            ip_result["is_ai_generated"] = False
 
-                    # Check for None values in critical boolean fields
-                    has_invalid_data = False
-                    if "ip_results" in response_data:
-                        for ip_result in response_data["ip_results"]:
-                            if ip_result.get("fair_use_applies") is None or ip_result.get("is_ai_generated") is None:
-                                has_invalid_data = True
-                                break
+            except (json.JSONDecodeError, KeyError):
+                # If we can't fix, let the _parse_response handle it
+                pass
 
-                    if has_invalid_data and attempt < max_retries - 1:
-                        logger.warning(
-                            f"Gemini returned invalid data (None for boolean fields), "
-                            f"retrying (attempt {attempt + 1}/{max_retries})"
-                        )
-                        await asyncio.sleep(2)  # Short delay before retry
-                        continue
+            return response
 
-                    # Also try to validate with Pydantic to catch schema issues early
-                    try:
-                        # Fix None values before validation
-                        if "ip_results" in response_data:
-                            for ip_result in response_data["ip_results"]:
-                                if ip_result.get("fair_use_applies") is None:
-                                    ip_result["fair_use_applies"] = False
-                                if ip_result.get("is_ai_generated") is None:
-                                    ip_result["is_ai_generated"] = False
+        except google_exceptions.PermissionDenied as e:
+            # Video is not accessible (private, restricted, or requires ownership)
+            logger.warning(f"Video not accessible (PERMISSION_DENIED): {youtube_url} - {e}")
+            # Raise a specific exception that the caller can catch and skip
+            raise ValueError(f"PERMISSION_DENIED: Video not accessible - {e}") from e
 
-                        # Try to create the model - if this fails, retry
-                        from app.models import GeminiAnalysisResult
-                        GeminiAnalysisResult(**response_data)
+        except google_exceptions.ResourceExhausted as e:
+            # Rate limit hit - just raise it, let PubSub retry
+            logger.warning(f"⚠️  Rate limit hit (429 RESOURCE_EXHAUSTED): {e}")
+            raise
 
-                    except Exception as validation_error:
-                        if attempt < max_retries - 1:
-                            logger.warning(
-                                f"Gemini response failed validation: {validation_error}, "
-                                f"retrying (attempt {attempt + 1}/{max_retries})"
-                            )
-                            logger.debug(f"Invalid response data: {json.dumps(response_data, indent=2)}")
-                            await asyncio.sleep(2)  # Short delay before retry
-                            continue
-                        else:
-                            # Last attempt - let it fail in _parse_response with full error details
-                            pass
-
-                except (json.JSONDecodeError, KeyError):
-                    # If we can't validate, let the _parse_response handle it
-                    pass
-
-                return response
-
-            except google_exceptions.ResourceExhausted:
-                # Rate limit hit
-                if attempt < max_retries - 1:
-                    wait_time = backoff_delays[attempt]
-                    logger.warning(
-                        f"Rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})"
-                    )
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"Rate limit exceeded after {max_retries} retries")
-                    raise
-
-            except google_exceptions.PermissionDenied as e:
-                # Video is not accessible (private, restricted, or requires ownership)
-                logger.warning(f"Video not accessible (PERMISSION_DENIED): {youtube_url} - {e}")
-                # Raise a specific exception that the caller can catch and skip
+        except Exception as e:
+            # Check if error message contains specific errors
+            error_str = str(e)
+            if "PERMISSION_DENIED" in error_str or "not owned by the user" in error_str:
+                logger.warning(f"Video not accessible (permission error): {youtube_url} - {e}")
                 raise ValueError(f"PERMISSION_DENIED: Video not accessible - {e}") from e
 
-            except Exception as e:
-                # Check if error message contains PERMISSION_DENIED (in case it's wrapped)
-                error_str = str(e)
-                if "PERMISSION_DENIED" in error_str or "not owned by the user" in error_str:
-                    logger.warning(f"Video not accessible (permission error): {youtube_url} - {e}")
-                    raise ValueError(f"PERMISSION_DENIED: Video not accessible - {e}") from e
-
-                logger.error(f"Gemini API call failed: {e}")
-                raise
+            # Just raise any other exception - let the handler decide what to do
+            logger.error(f"Gemini API call failed: {e}")
+            raise
 
     def _parse_response(self, response: Any) -> GeminiAnalysisResult:
         """

@@ -560,6 +560,7 @@ class VideoProcessor:
                 "status": VideoStatus.DISCOVERED.value,
                 "discovered_at": datetime.now(UTC),
                 "updated_at": datetime.now(UTC),
+                "vision_triggered_at": datetime.now(UTC),  # Mark as triggered immediately for new videos
             }
 
             doc_ref.set(video_doc)

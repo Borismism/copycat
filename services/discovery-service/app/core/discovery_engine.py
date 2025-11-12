@@ -460,107 +460,55 @@ class DiscoveryEngine:
                         logger.info(f"      ✅ NEW: {metadata.video_id} - '{metadata.title}' (risk={metadata.initial_risk}{ip_info})")
                     continue
 
-                # VIDEO EXISTS - check if this config should subscribe to it
+                # VIDEO EXISTS - check if already sent to vision analyzer
                 old_data = doc.to_dict()
-                vision_scan_status = old_data.get("vision_scan_status")
+                vision_triggered_at = old_data.get("vision_triggered_at")
                 old_matched_ips = old_data.get("matched_ips", [])
 
-                logger.debug(f"  [{idx}/{len(results)}] 🔄 EXISTS: {metadata.video_id}, scan_status={vision_scan_status}")
+                logger.debug(f"  [{idx}/{len(results)}] 🔄 EXISTS: {metadata.video_id}, triggered_at={vision_triggered_at}")
 
-                # Check if THIS config's IPs match the video
-                new_matched_ips = self.processor.match_ips(metadata)
-
-                # Find IPs that aren't already subscribed
-                new_ips_to_add = [ip for ip in new_matched_ips if ip not in old_matched_ips]
-
-                if new_ips_to_add:
-                    # This config found the video but it's not subscribed yet!
-                    logger.info(f"      🔔 SUBSCRIBING {len(new_ips_to_add)} new IPs to existing video: {metadata.video_id}")
-
-                    # Add new IPs to matched_ips array
-                    updated_ips = old_matched_ips + new_ips_to_add
-
-                    # If video was already scanned, reset scan status so it gets rescanned!
-                    update_data = {
-                        "matched_ips": updated_ips,
-                        "updated_at": datetime.now(UTC),
-                    }
-
-                    if vision_scan_status == "scanned":
-                        # Reset scan status - new config needs vision analysis!
-                        update_data["vision_scan_status"] = None
-                        logger.info("      🔄 RESETTING scan status - will be rescanned with new IPs!")
-
-                    doc_ref.update(update_data)
-
-                    # Republish so risk-analyzer can rescore with new IPs
-                    metadata.matched_ips = updated_ips
-                    message_data = metadata.model_dump_json().encode("utf-8")
-                    self.processor.publisher.publish(self.processor.topic_path, message_data)
-
-                    new_count += 1  # Count as NEW for this config!
-                    logger.info(f"      ✅ NEW for this config: {metadata.video_id} - '{metadata.title}' (added IPs: {new_ips_to_add})")
-                    continue
-
-                if vision_scan_status == "scanned":
-                    # Already scanned with vision analyzer and this config already subscribed - skip
+                # Check if already sent to vision analyzer pipeline
+                if vision_triggered_at is not None:
+                    # Already triggered - NEVER trigger again automatically
                     skipped_count += 1
-                    logger.debug(f"      ⏭️  SKIP: {metadata.video_id} (already scanned & subscribed)")
+                    logger.debug(f"      ⏭️  SKIP: {metadata.video_id} (already triggered for vision analysis)")
+
+                    # Still update matched IPs if new ones found
+                    new_matched_ips = self.processor.match_ips(metadata)
+                    new_ips_to_add = [ip for ip in new_matched_ips if ip not in old_matched_ips]
+
+                    if new_ips_to_add:
+                        # Add new IPs to the list, but don't retrigger analysis
+                        updated_ips = old_matched_ips + new_ips_to_add
+                        doc_ref.update({
+                            "matched_ips": updated_ips,
+                            "updated_at": datetime.now(UTC),
+                        })
+                        logger.info(f"      📝 Added {len(new_ips_to_add)} new IPs to existing video: {new_ips_to_add}")
+
                     continue
 
-                # EXISTS but NOT SCANNED - update for virality detection
-                old_views = old_data.get("view_count", 0)
-                new_views = metadata.view_count
+                # Video exists but NEVER triggered before (edge case: old videos)
+                logger.info(f"      🚀 TRIGGERING: {metadata.video_id} - never sent to vision analyzer before")
 
-                # Calculate view velocity
-                updated_at = old_data.get("updated_at")
-                if isinstance(updated_at, datetime):
-                    time_elapsed_hours = (
-                        datetime.now(UTC) - updated_at
-                    ).total_seconds() / 3600
-                else:
-                    time_elapsed_hours = 24  # Default to 24h if missing
+                # Match IPs
+                matched_ips = self.processor.match_ips(metadata)
+                metadata.matched_ips = matched_ips
 
-                views_gained = new_views - old_views
-                view_velocity = (
-                    int(views_gained / time_elapsed_hours)
-                    if time_elapsed_hours > 0
-                    else 0
-                )
-
-                # Update metadata
+                # Update with trigger timestamp and publish
                 doc_ref.update({
-                    "view_count": new_views,
-                    "like_count": metadata.like_count,
-                    "comment_count": metadata.comment_count,
-                    "view_velocity": view_velocity,
+                    "vision_triggered_at": datetime.now(UTC),
+                    "matched_ips": matched_ips,
                     "updated_at": datetime.now(UTC),
-                    "last_seen_at": datetime.now(UTC),
                 })
 
-                # Check if trending (significant view increase)
-                view_change_pct = (views_gained / old_views * 100) if old_views > 0 else 0
-                is_trending = views_gained > 1000 or view_change_pct > 10
+                # Publish to start the pipeline
+                message_data = metadata.model_dump_json().encode("utf-8")
+                self.processor.publisher.publish(self.processor.topic_path, message_data)
+                new_count += 1
+                logger.info(f"      ✅ TRIGGERED: {metadata.video_id} - '{metadata.title}' (matched IPs: {matched_ips})")
+                continue
 
-                if is_trending:
-                    # Republish for priority rescore
-                    message_data = metadata.model_dump_json().encode("utf-8")
-                    self.processor.publisher.publish(
-                        self.processor.topic_path, message_data
-                    )
-                    rediscovered_count += 1
-                    logger.info(
-                        f"      📈 TRENDING (republished): {metadata.video_id} - "
-                        f"views {old_views:,} → {new_views:,} "
-                        f"(+{views_gained:,}, +{view_change_pct:.1f}%, velocity={view_velocity}/hr)"
-                    )
-                else:
-                    # Just update, don't republish
-                    rediscovered_count += 1
-                    logger.debug(
-                        f"      ↻ UPDATE (no republish): {metadata.video_id} - "
-                        f"views {old_views:,} → {new_views:,} (+{views_gained:,}, +{view_change_pct:.1f}%)"
-                    )
 
             except Exception as e:
                 log_exception_json(logger, "Error processing video", e, severity="ERROR")
