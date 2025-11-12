@@ -208,7 +208,7 @@ run_tests() {
     cd "$service_dir"
 
     # Install dev dependencies (pytest, etc.)
-    uv sync --group dev
+    uv sync --extra dev
 
     # Run pytest with coverage
     if uv run pytest tests/ -v --tb=short --maxfail=1 2>&1 | tee /tmp/pytest-output.txt; then
