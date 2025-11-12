@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"  # Latest model with video support
     gemini_location: str = "europe-west1"  # Vertex AI region (read from GEMINI_LOCATION env var)
     gemini_temperature: float = 0.2  # Low temp for consistency
-    gemini_max_output_tokens: int = 40000  # Allow detailed responses (max is 65536)
+    gemini_max_output_tokens: int = 65536  # Maximum allowed by Gemini API
 
     # Budget settings (in EUR)
     daily_budget_eur: float = 0.01  # €0.01 default (1 cent) - should be set via env var
