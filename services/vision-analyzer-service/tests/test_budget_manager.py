@@ -22,6 +22,7 @@ class TestBudgetManager:
 
     def test_can_afford_with_sufficient_budget(self, budget_manager):
         """Test can_afford when budget is available."""
+        budget_manager._cached_date = budget_manager._get_today_key()
         budget_manager._cached_total = 0.0
         # Ask for half the daily budget - should always work
         cost = budget_manager.DAILY_BUDGET_EUR / 2
@@ -30,6 +31,7 @@ class TestBudgetManager:
     def test_can_afford_insufficient_budget(self, budget_manager):
         """Test can_afford when budget would be exceeded."""
         # Set to 99% of budget
+        budget_manager._cached_date = budget_manager._get_today_key()
         budget_manager._cached_total = budget_manager.DAILY_BUDGET_EUR * 0.99
         # Ask for 10% more - should fail
         cost = budget_manager.DAILY_BUDGET_EUR * 0.10
@@ -38,6 +40,7 @@ class TestBudgetManager:
     def test_can_afford_exact_budget(self, budget_manager):
         """Test can_afford at exact budget limit."""
         # Use 90% of budget
+        budget_manager._cached_date = budget_manager._get_today_key()
         budget_manager._cached_total = budget_manager.DAILY_BUDGET_EUR * 0.90
         # Ask for 10% - should work (exactly at limit)
         assert budget_manager.can_afford(budget_manager.DAILY_BUDGET_EUR * 0.10) is True
