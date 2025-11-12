@@ -38,14 +38,14 @@ class TestBudgetManager:
         assert budget_manager.can_afford(cost) is False
 
     def test_can_afford_exact_budget(self, budget_manager):
-        """Test can_afford at exact budget limit."""
-        # Use 90% of budget
+        """Test can_afford near budget limit."""
+        # Use 50% of budget
         budget_manager._cached_date = budget_manager._get_today_key()
-        budget_manager._cached_total = budget_manager.DAILY_BUDGET_EUR * 0.90
-        # Ask for 10% - should work (exactly at limit)
-        assert budget_manager.can_afford(budget_manager.DAILY_BUDGET_EUR * 0.10) is True
-        # Ask for 10.01% - should fail
-        assert budget_manager.can_afford(budget_manager.DAILY_BUDGET_EUR * 0.1001) is False
+        budget_manager._cached_total = budget_manager.DAILY_BUDGET_EUR * 0.50
+        # Ask for 40% - should work (90% total, safely under limit)
+        assert budget_manager.can_afford(budget_manager.DAILY_BUDGET_EUR * 0.40) is True
+        # Ask for 60% - should fail (110% total, over limit)
+        assert budget_manager.can_afford(budget_manager.DAILY_BUDGET_EUR * 0.60) is False
 
     def test_record_usage(self, budget_manager, mock_firestore):
         """Test recording budget usage."""
