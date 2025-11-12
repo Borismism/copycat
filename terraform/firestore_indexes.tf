@@ -204,6 +204,29 @@ resource "google_firestore_index" "scan_history_status_completed_at" {
   }
 }
 
+resource "google_firestore_index" "scan_history_video_id_status" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "scan_history"
+
+  # Index for: .where("video_id", "==", X).where("status", "==", "running")
+  # Required for deduplication check in vision-analyzer worker
+  fields {
+    field_path = "video_id"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
 # ==============================================================================
 # discovery_history collection indexes
 # ==============================================================================

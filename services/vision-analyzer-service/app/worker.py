@@ -174,6 +174,30 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
             f"priority={scan_message.priority}, scan_priority={scan_priority}"
         )
 
+        # Initialize Firestore client (needed for all checks below)
+        firestore_client = firestore.Client(project=settings.gcp_project_id)
+
+        # Deduplication: Check if video is already being scanned
+        try:
+            existing_scans = (
+                firestore_client.collection("scan_history")
+                .where("video_id", "==", video_id)
+                .where("status", "==", "running")
+                .limit(1)
+                .stream()
+            )
+
+            if list(existing_scans):
+                logger.info(
+                    f"Skipping video {video_id}: already has a running scan. "
+                    "This prevents duplicate concurrent scans."
+                )
+                message.ack()
+                return
+        except Exception as e:
+            logger.warning(f"Failed to check for existing scans: {e}")
+            # Continue anyway - better to have duplicate scan than miss one
+
         # Check scan priority threshold
         if scan_priority is not None and scan_priority < MINIMUM_SCAN_PRIORITY:
             logger.info(
@@ -183,7 +207,6 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
 
             # Update video status to skipped
             try:
-                firestore_client = firestore.Client(project=settings.gcp_project_id)
                 doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(
                     video_id
                 )
@@ -202,7 +225,6 @@ def message_callback(message: pubsub_v1.subscriber.message.Message):
         # Create scan history entry
         import uuid
         scan_id = str(uuid.uuid4())
-        firestore_client = firestore.Client(project=settings.gcp_project_id)
 
         scan_history = {
             "scan_id": scan_id,

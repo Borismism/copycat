@@ -164,6 +164,23 @@ async def scan_video(
         if not video:
             raise HTTPException(status_code=404, detail=f"Video {video_id} not found")
 
+        # Check if video is already being scanned (prevent duplicates)
+        from google.cloud import firestore as firestore_lib
+        db = firestore_lib.Client(project=settings.gcp_project_id, database=settings.firestore_database_id)
+        existing_scans = list(
+            db.collection("scan_history")
+            .where("video_id", "==", video_id)
+            .where("status", "==", "running")
+            .limit(1)
+            .stream()
+        )
+
+        if existing_scans:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Video {video_id} is already being scanned. Please wait for the current scan to complete."
+            )
+
         # NOTE: scan_history entry will be created by vision-analyzer worker
         # No need to create it here - avoids duplicates
 
