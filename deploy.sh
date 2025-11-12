@@ -207,6 +207,9 @@ run_tests() {
     # Change to service directory
     cd "$service_dir"
 
+    # Install dev dependencies (pytest, etc.)
+    uv sync --group dev
+
     # Run pytest with coverage
     if uv run pytest tests/ -v --tb=short --maxfail=1 2>&1 | tee /tmp/pytest-output.txt; then
         log_success "All tests passed for $service"
