@@ -148,6 +148,9 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker europe-west4-docker.pkg.dev
 
