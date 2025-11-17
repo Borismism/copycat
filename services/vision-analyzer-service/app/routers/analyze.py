@@ -143,27 +143,9 @@ async def analyze_video(request: Request):
                 media_type="application/json"
             )
 
-        # Create scan history entry
-        scan_id = str(uuid.uuid4())
-
-        scan_history = {
-            "scan_id": scan_id,
-            "scan_type": "video_single",
-            "video_id": scan_message.video_id,
-            "video_title": scan_message.metadata.title,
-            "channel_id": scan_message.metadata.channel_id,
-            "channel_title": scan_message.metadata.channel_title,
-            "status": "running",
-            "started_at": firestore.SERVER_TIMESTAMP,
-            "matched_ips": scan_message.metadata.matched_ips,
-        }
-
-        try:
-            firestore_client.collection("scan_history").document(scan_id).set(scan_history)
-            logger.info(f"Created scan history: {scan_id}")
-        except Exception as e:
-            logger.warning(f"Failed to create scan history: {e}")
-            # Continue anyway - not critical
+        # DON'T create scan_history yet - wait until we're ready to actually process
+        # This prevents creating orphaned "running" scans on early failures (config issues, budget, etc.)
+        scan_id = None  # Will be created before analysis starts
 
         # Update video status to "processing"
         try:
@@ -187,15 +169,8 @@ async def analyze_video(request: Request):
             if not configs:
                 logger.error("❌ No IP configs available in system!")
 
-                # Update scan history
-                try:
-                    firestore_client.collection("scan_history").document(scan_id).update({
-                        "status": "failed",
-                        "completed_at": firestore.SERVER_TIMESTAMP,
-                        "error_message": "No IP configs available in system",
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to update scan history: {e}")
+                # No scan_history to update - we haven't created it yet
+                # (This is an early validation failure)
 
                 # Update video status
                 try:
@@ -229,15 +204,8 @@ async def analyze_video(request: Request):
             if not configs:
                 logger.error(f"❌ No valid configs for video {video_id}. matched_ips={matched_ips}.")
 
-                # Update scan history
-                try:
-                    firestore_client.collection("scan_history").document(scan_id).update({
-                        "status": "failed",
-                        "completed_at": firestore.SERVER_TIMESTAMP,
-                        "error_message": f"No IP configs found for matched_ips={matched_ips}",
-                    })
-                except Exception as e:
-                    logger.error(f"Failed to update scan history: {e}")
+                # No scan_history to update - we haven't created it yet
+                # (This is an early validation failure)
 
                 # Update video status
                 try:
@@ -257,8 +225,45 @@ async def analyze_video(request: Request):
                     media_type="application/json"
                 )
 
+        # Check if scan_history already exists for this video (PubSub retry)
+        # This prevents creating duplicate "running" scans on retries
+        existing_scans = list(
+            firestore_client.collection("scan_history")
+            .where("video_id", "==", video_id)
+            .where("status", "==", "running")
+            .limit(1)
+            .stream()
+        )
+
+        if existing_scans:
+            # Reuse existing scan (PubSub retry)
+            scan_id = existing_scans[0].id
+            logger.info(f"♻️  Reusing existing scan_history: {scan_id} (PubSub retry)")
+        else:
+            # Create new scan_history - we're past all validation and ready to process
+            scan_id = str(uuid.uuid4())
+
+            scan_history = {
+                "scan_id": scan_id,
+                "scan_type": "video_single",
+                "video_id": scan_message.video_id,
+                "video_title": scan_message.metadata.title,
+                "channel_id": scan_message.metadata.channel_id,
+                "channel_title": scan_message.metadata.channel_title,
+                "status": "running",
+                "started_at": firestore.SERVER_TIMESTAMP,
+                "matched_ips": scan_message.metadata.matched_ips,
+            }
+
+            try:
+                firestore_client.collection("scan_history").document(scan_id).set(scan_history)
+                logger.info(f"Created scan history: {scan_id}")
+            except Exception as e:
+                logger.warning(f"Failed to create scan history: {e}")
+                # Continue anyway - not critical
+
         # Process video analysis synchronously (keeps connection alive)
-        logger.info(f"🚀 Starting video analysis for {video_id}")
+        logger.info(f"🚀 Starting video analysis for {video_id} (scan_id={scan_id})")
 
         try:
             result = await video_analyzer.analyze_video(
@@ -274,22 +279,23 @@ async def analyze_video(request: Request):
                 f"action={result.analysis.overall_recommendation}"
             )
 
-            # Update scan history to completed
-            try:
-                firestore_client.collection("scan_history").document(scan_id).update({
-                    "status": "completed",
-                    "completed_at": firestore.SERVER_TIMESTAMP,
-                    "result": {
-                        "success": True,
-                        "has_infringement": has_infringement,
-                        "overall_recommendation": result.analysis.overall_recommendation,
-                        "cost_usd": result.metrics.cost_usd,
-                        "ip_count": len(result.analysis.ip_results),
-                    }
-                })
-                logger.info(f"Updated scan history {scan_id} to completed")
-            except Exception as e:
-                log_exception_json(logger, "Failed to update scan history", e, severity="WARNING")
+            # Update scan history to completed (only if we created it)
+            if scan_id:
+                try:
+                    firestore_client.collection("scan_history").document(scan_id).update({
+                        "status": "completed",
+                        "completed_at": firestore.SERVER_TIMESTAMP,
+                        "result": {
+                            "success": True,
+                            "has_infringement": has_infringement,
+                            "overall_recommendation": result.analysis.overall_recommendation,
+                            "cost_usd": result.metrics.cost_usd,
+                            "ip_count": len(result.analysis.ip_results),
+                        }
+                    })
+                    logger.info(f"Updated scan history {scan_id} to completed")
+                except Exception as e:
+                    log_exception_json(logger, "Failed to update scan history", e, severity="WARNING")
 
             return Response(
                 content=json.dumps({
@@ -384,17 +390,18 @@ async def analyze_video(request: Request):
                     media_type="application/json"
                 )
 
-            # Only reach here for permanent failures (PERMISSION_DENIED)
-            # Update scan history
-            try:
-                firestore_client.collection("scan_history").document(scan_id).update({
-                    "status": scan_status,
-                    "completed_at": firestore.SERVER_TIMESTAMP,
-                    "error_message": error_message,
-                    "error_type": error_type,
-                })
-            except Exception as update_error:
-                log_exception_json(logger, "Failed to update scan history", update_error, severity="WARNING")
+            # Only reach here for permanent failures (PERMISSION_DENIED, invalid JSON)
+            # Update scan history (only if we created it)
+            if scan_id:
+                try:
+                    firestore_client.collection("scan_history").document(scan_id).update({
+                        "status": scan_status,
+                        "completed_at": firestore.SERVER_TIMESTAMP,
+                        "error_message": error_message,
+                        "error_type": error_type,
+                    })
+                except Exception as update_error:
+                    log_exception_json(logger, "Failed to update scan history", update_error, severity="WARNING")
 
             # Update video status
             try:
@@ -409,14 +416,17 @@ async def analyze_video(request: Request):
             except Exception as update_error:
                 log_exception_json(logger, "Failed to update video status", update_error, severity="WARNING")
 
+            response_data = {
+                "status": "failed",
+                "video_id": video_id,
+                "error_type": error_type,
+                "error_message": error_message[:200]
+            }
+            if scan_id:
+                response_data["scan_id"] = scan_id
+
             return Response(
-                content=json.dumps({
-                    "status": "failed",
-                    "video_id": video_id,
-                    "scan_id": scan_id,
-                    "error_type": error_type,
-                    "error_message": error_message[:200]
-                }),
+                content=json.dumps(response_data),
                 status_code=response_code,
                 media_type="application/json"
             )
@@ -426,12 +436,16 @@ async def analyze_video(request: Request):
 
         # Don't update any status - let PubSub retry
         # Return 500 for unknown/unexpected errors
+        response_data = {
+            "status": "error",
+            "video_id": video_id,
+            "message": str(e)[:200]
+        }
+        if scan_id:
+            response_data["scan_id"] = scan_id
+
         return Response(
-            content=json.dumps({
-                "status": "error",
-                "video_id": video_id,
-                "message": str(e)[:200]
-            }),
+            content=json.dumps(response_data),
             status_code=500,  # PubSub will retry (limited)
             media_type="application/json"
         )
