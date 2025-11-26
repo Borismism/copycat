@@ -9,8 +9,8 @@
 # YouTube Data API key - unrestricted for maximum compatibility
 # This key is automatically created and stored in Secret Manager
 resource "google_apikeys_key" "youtube_api_key" {
-  name         = "copycat-youtube-api-key-v4"
-  display_name = "Copycat YouTube API Key v4"
+  name         = "copycat-youtube-api-key-v3"
+  display_name = "Copycat YouTube API Key v3"
   project      = var.project_id
 
   # No restrictions - unrestricted API key

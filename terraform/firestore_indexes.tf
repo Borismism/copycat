@@ -85,7 +85,7 @@ resource "google_firestore_index" "videos_status_last_analyzed_at" {
   database   = google_firestore_database.copycat.name
   collection = "videos"
 
-  # Index for: .where("status", "in", ["failed", "error"]).order_by("last_analyzed_at", DESC)
+  # Index for: .where("status", "in", ["failed", "error"]).order_by("last_analyzed_at", ASC)
   # Required for fetching recent errors in analytics
   fields {
     field_path = "status"
@@ -94,12 +94,12 @@ resource "google_firestore_index" "videos_status_last_analyzed_at" {
 
   fields {
     field_path = "last_analyzed_at"
-    order      = "DESCENDING"
+    order      = "ASCENDING"
   }
 
   fields {
     field_path = "__name__"
-    order      = "DESCENDING"
+    order      = "ASCENDING"
   }
 }
 
