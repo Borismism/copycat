@@ -48,7 +48,7 @@ deploy-infra:
   script:
     - apt-get update && apt-get install -y unzip
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
+    - rm -rf /usr/local/bin/terraform && unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
     - export PATH="/usr/local/bin:$PATH"
     - terraform --version
     - chmod +x deploy.sh
@@ -74,7 +74,7 @@ deploy-services:
       fi
     - apt-get update && apt-get install -y unzip curl
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
+    - rm -rf /usr/local/bin/terraform && unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
     - terraform --version
@@ -101,7 +101,7 @@ deploy-services:
   script:
     - apt-get update && apt-get install -y unzip curl
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
+    - rm -rf /usr/local/bin/terraform && unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
     - terraform --version
@@ -148,7 +148,7 @@ deploy-all-dev:
   script:
     - apt-get update && apt-get install -y unzip curl
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
+    - rm -rf /usr/local/bin/terraform && unzip -o terraform.zip && chmod +x terraform && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"
     - terraform --version
