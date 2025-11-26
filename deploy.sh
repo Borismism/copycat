@@ -155,13 +155,24 @@ build_and_push_image() {
     # Configure Docker auth
     gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet >&2
 
-    # Build locally with Docker
-    log_info "Building with Docker (local)..." >&2
-    docker build --platform linux/amd64 -t "$image_url" "$service_dir" >&2
+    # Check if docker is available
+    if command -v docker &>/dev/null && docker info &>/dev/null; then
+        # Build locally with Docker
+        log_info "Building with Docker (local)..." >&2
+        docker build --platform linux/amd64 -t "$image_url" "$service_dir" >&2
 
-    # Push to Artifact Registry
-    log_info "Pushing to Artifact Registry..." >&2
-    docker push "$image_url" >&2
+        # Push to Artifact Registry
+        log_info "Pushing to Artifact Registry..." >&2
+        docker push "$image_url" >&2
+    else
+        # Fall back to Cloud Build
+        log_info "Docker not available, using Cloud Build..." >&2
+        gcloud builds submit "$service_dir" \
+            --tag="$image_url" \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --quiet >&2
+    fi
 
     log_success "Image built and pushed: $image_url" >&2
     echo "$image_url"

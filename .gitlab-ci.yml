@@ -5,12 +5,8 @@ stages:
 
 variables:
   TF_IN_AUTOMATION: "true"
-  DOCKER_HOST: tcp://docker:2375
-  DOCKER_TLS_CERTDIR: ""
 
 .gcp-auth: &gcp-auth
-  services:
-    - docker:dind
   before_script:
     - echo "$GCP_SERVICE_ACCOUNT_KEY" | base64 -d > /tmp/gcp-key.json
     - gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
@@ -50,7 +46,7 @@ deploy-infra:
   image: google/cloud-sdk:slim
   <<: *gcp-auth
   script:
-    - apt-get update && apt-get install -y unzip docker.io
+    - apt-get update && apt-get install -y unzip
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
     - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - chmod +x deploy.sh
@@ -74,7 +70,7 @@ deploy-services:
         echo "No services to deploy"
         exit 0
       fi
-    - apt-get update && apt-get install -y unzip curl docker.io
+    - apt-get update && apt-get install -y unzip curl
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
     - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -100,7 +96,7 @@ deploy-services:
   image: google/cloud-sdk:slim
   <<: *gcp-auth
   script:
-    - apt-get update && apt-get install -y unzip curl docker.io
+    - apt-get update && apt-get install -y unzip curl
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
     - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -146,7 +142,7 @@ deploy-all-dev:
   image: google/cloud-sdk:slim
   <<: *gcp-auth
   script:
-    - apt-get update && apt-get install -y unzip curl docker.io
+    - apt-get update && apt-get install -y unzip curl
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
     - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
