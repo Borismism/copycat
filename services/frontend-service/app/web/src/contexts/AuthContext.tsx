@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
-export type UserRole = 'admin' | 'editor' | 'legal' | 'read'
+export type UserRole = 'admin' | 'editor' | 'legal' | 'read' | 'client'
 
 export type User = {
   email: string

@@ -131,6 +131,7 @@ def get_discovery_engine(
 @router.post("/run")
 async def discover(
     max_quota: int | None = None,  # Auto-calculate if not provided
+    ip_id: str | None = None,  # Optional: Run discovery for specific IP only
     engine: DiscoveryEngine = Depends(get_discovery_engine),
     quota_manager: QuotaManager = Depends(get_quota_manager),
     firestore_client: firestore.Client = Depends(get_firestore_client),
@@ -154,6 +155,7 @@ async def discover(
 
     Args:
         max_quota: Maximum quota limit (optional - auto-calculated if not provided)
+        ip_id: IP config ID to run discovery for (optional - searches all IPs if not provided)
 
     Returns:
         Immediate response with run_id (discovery runs in background)
@@ -164,6 +166,30 @@ async def discover(
         logger.info("Refreshed quota from Google API before discovery run")
     except Exception as e:
         logger.error(f"Failed to refresh quota before discovery: {e}")
+
+    # Load keywords for specific IP if requested
+    custom_keywords = None
+    if ip_id:
+        logger.info(f"Running discovery for specific IP: {ip_id}")
+        try:
+            ip_doc = firestore_client.collection("ip_configs").document(ip_id).get()
+            if not ip_doc.exists:
+                raise HTTPException(status_code=404, detail=f"IP config '{ip_id}' not found")
+
+            ip_data = ip_doc.to_dict()
+            if ip_data.get("deleted", False):
+                raise HTTPException(status_code=400, detail=f"IP config '{ip_id}' is deleted")
+
+            custom_keywords = ip_data.get("search_keywords", [])
+            if not custom_keywords:
+                raise HTTPException(status_code=400, detail=f"IP config '{ip_id}' has no search keywords")
+
+            logger.info(f"Loaded {len(custom_keywords)} keywords for IP '{ip_data.get('name')}'")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to load IP config: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to load IP config: {str(e)}")
 
     # Auto-calculate optimal quota if not specified
     if max_quota is None:
@@ -183,6 +209,7 @@ async def discover(
         "max_quota": max_quota,
         "started_at": firestore.SERVER_TIMESTAMP,
         "quota_auto_calculated": max_quota is None or "auto" in str(max_quota).lower(),
+        "ip_id": ip_id,  # Track which IP this run is for
     }
 
     try:
@@ -202,7 +229,8 @@ async def discover(
         try:
             stats = await engine.discover(
                 max_quota=max_quota,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                custom_keywords=custom_keywords  # Pass IP-specific keywords if provided
             )
 
             # Extract detailed query information from progress events

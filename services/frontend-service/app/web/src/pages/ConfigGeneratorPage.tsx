@@ -86,6 +86,29 @@ export const ConfigGeneratorPage: React.FC = () => {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // Discovery handler
+  const handleDiscoverForIP = async (ipId: string, ipName: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click
+
+    try {
+      const response = await fetch(`/api/discovery/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip_id: ipId, max_quota: 1000 })  // Use 1000 quota for IP-specific run
+      });
+
+      if (!response.ok) {
+        throw new Error(`Discovery failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      showToast(`🔍 Discovery started for "${ipName}"! (Run ID: ${data.run_id.substring(0, 8)}...)`, 'success');
+    } catch (err) {
+      console.error('Discovery error:', err);
+      showToast(`Failed to start discovery: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error');
+    }
+  };
+
   // Delete config handler
   const handleDeleteConfig = () => {
     setShowDeleteModal(true);
@@ -582,14 +605,27 @@ export const ConfigGeneratorPage: React.FC = () => {
               >
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">{config.name}</h3>
                 <p className="text-sm text-gray-600 mb-3">{config.owner}</p>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-3">
                   <div className="text-sm">
                     <span className="text-gray-500">Priority: </span>
                     <span className="font-medium text-gray-900">{config.priority}</span>
                   </div>
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={(e) => handleDiscoverForIP(config.id, config.name, e)}
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Discover Videos
+                  </button>
+                  <div className="flex items-center">
+                    <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </div>
                 </div>
               </div>
             ))}

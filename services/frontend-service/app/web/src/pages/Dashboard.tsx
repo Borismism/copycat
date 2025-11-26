@@ -8,11 +8,14 @@ import ActivityTimeline from '../components/ActivityTimeline'
 import AlertCenter from '../components/AlertCenter'
 import RecentActivityFeed from '../components/RecentActivityFeed'
 import PerformanceGauges from '../components/PerformanceGauges'
+import { usePermissions } from '../hooks/usePermissions'
 
 export default function Dashboard() {
+  const { isClient, canViewAdminMetrics } = usePermissions()
   const [lastUpdated, setLastUpdated] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [viewMode, setViewMode] = useState<'hourly' | 'daily'>('hourly')
+  const [metricsTimeRange, setMetricsTimeRange] = useState('24h')
 
   // Format selected date for API (YYYY-MM-DD in UTC)
   const startDateParam = selectedDate.toISOString().split('T')[0]
@@ -35,12 +38,12 @@ export default function Dashboard() {
     }
   )
 
-  // Fetch summary
+  // Fetch summary with time range
   const { data: summary, error: summaryError } = useSWR(
-    'summary',
-    () => statusAPI.getSummary(),
+    ['summary', metricsTimeRange],
+    () => statusAPI.getSummary(metricsTimeRange),
     {
-      refreshInterval: 30000,
+      refreshInterval: metricsTimeRange === '24h' ? 30000 : 0, // Only auto-refresh for 24h
       revalidateOnFocus: false,
       dedupingInterval: 5000
     }
@@ -178,9 +181,13 @@ export default function Dashboard() {
       <div className="space-y-6">
             {/* Page Header */}
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">System Overview</h2>
+              <h2 className="text-2xl font-bold text-gray-900">
+                {isClient ? 'Content Protection Dashboard' : 'System Overview'}
+              </h2>
               <p className="text-gray-600">
-                Real-time monitoring and analytics
+                {isClient
+                  ? 'Track video scans and infringement detection'
+                  : 'Real-time monitoring and analytics'}
                 <span className="ml-2 text-xs text-gray-400">
                   Auto-refreshes every 30 seconds
                 </span>
@@ -196,11 +203,52 @@ export default function Dashboard() {
 
             {/* Key Metrics Grid */}
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Key Metrics (24h)</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {isClient ? 'Scan Activity' : 'Key Metrics'}
+                  {metricsTimeRange === '24h' && ' (24h)'}
+                  {metricsTimeRange === '7d' && ' (7 days)'}
+                  {metricsTimeRange === '30d' && ' (30 days)'}
+                  {metricsTimeRange === '1y' && ' (1 year)'}
+                  {metricsTimeRange === 'this_year' && ' (This Year)'}
+                  {metricsTimeRange === 'all_time' && ' (All Time)'}
+                </h3>
+                {/* Time Range Filter */}
+                <div className="flex bg-gray-100 rounded-lg p-1">
+                  {(isClient
+                    ? [
+                        { value: '24h', label: '24h' },
+                        { value: '7d', label: '7d' },
+                        { value: '30d', label: '30d' },
+                        { value: 'all_time', label: 'All Time' },
+                      ]
+                    : [
+                        { value: '24h', label: '24h' },
+                        { value: '7d', label: '7d' },
+                        { value: '30d', label: '30d' },
+                        { value: '1y', label: '1y' },
+                        { value: 'this_year', label: 'This Year' },
+                        { value: 'all_time', label: 'All Time' },
+                      ]
+                  ).map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => setMetricsTimeRange(option.value)}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        metricsTimeRange === option.value
+                          ? 'bg-white text-blue-600 shadow-sm'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {loading ? (
                 <MetricsGridSkeleton />
               ) : (
-                <MetricsGrid summary={summary} metrics={performanceMetrics} />
+                <MetricsGrid summary={summary} metrics={performanceMetrics} timeRange={metricsTimeRange} />
               )}
             </div>
 
@@ -304,15 +352,15 @@ export default function Dashboard() {
               ) : null}
             </div>
 
-            {/* Performance Gauges */}
-            {!loading && performanceMetrics && (
+            {/* Performance Gauges - Only for admin users */}
+            {!loading && performanceMetrics && canViewAdminMetrics && (
               <PerformanceGauges metrics={performanceMetrics} />
             )}
 
             {/* Two-Column Layout: Last Run + Recent Activity */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Last Discovery Run */}
-              {loading ? (
+            <div className={`grid grid-cols-1 ${isClient ? '' : 'lg:grid-cols-2'} gap-6`}>
+              {/* Last Discovery Run - Only for admin users */}
+              {!isClient && (loading ? (
                 <SkeletonCard />
               ) : (
                 summary?.last_run && (
@@ -358,7 +406,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                 )
-              )}
+              ))}
 
               {/* Recent Activity Feed */}
               {loading ? (

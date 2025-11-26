@@ -12,17 +12,30 @@ export default function Layout({ children }: LayoutProps) {
   const [showActAsModal, setShowActAsModal] = useState(false)
   const [actAsEmail, setActAsEmail] = useState('')
 
-  const navLinks = [
-    { path: '/', label: 'Home' },
-    { path: '/dashboards', label: 'Services' },
-    { path: '/config', label: 'IP Configuration' },
-    { path: '/videos', label: 'Videos' },
-    { path: '/channels', label: 'Enforcement' },
-  ]
+  // Build navigation links based on user role
+  const navLinks = []
 
-  // Add admin-only routes (check actualUser for real admin, not impersonated)
-  if (actualUser?.role === 'admin') {
-    navLinks.push({ path: '/admin/roles', label: 'User Roles' })
+  // Client users only see: Dashboard, Videos, Channels
+  if (user?.role === 'client') {
+    navLinks.push(
+      { path: '/', label: 'Dashboard' },
+      { path: '/videos', label: 'Videos' },
+      { path: '/channels', label: 'Channels' }
+    )
+  } else {
+    // All other roles see full navigation
+    navLinks.push(
+      { path: '/', label: 'Home' },
+      { path: '/dashboards', label: 'Services' },
+      { path: '/config', label: 'IP Configuration' },
+      { path: '/videos', label: 'Videos' },
+      { path: '/channels', label: 'Enforcement' }
+    )
+
+    // Add admin-only routes (check actualUser for real admin, not impersonated)
+    if (actualUser?.role === 'admin') {
+      navLinks.push({ path: '/admin/roles', label: 'User Roles' })
+    }
   }
 
   const handleActAs = async (e: React.FormEvent) => {
@@ -45,8 +58,12 @@ export default function Layout({ children }: LayoutProps) {
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center mb-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Copycat Management</h1>
-              <div className="text-sm text-gray-500">AI Content Detection System</div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {user?.role === 'client' ? 'Content Protection Portal' : 'Copycat Management'}
+              </h1>
+              <div className="text-sm text-gray-500">
+                {user?.role === 'client' ? 'Monitor your protected content' : 'AI Content Detection System'}
+              </div>
             </div>
             <div className="flex items-center gap-4">
               {loading ? (

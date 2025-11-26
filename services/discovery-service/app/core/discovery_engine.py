@@ -66,7 +66,7 @@ class DiscoveryEngine:
 
         logger.info("DiscoveryEngine initialized (smart query-based + search history)")
 
-    async def discover(self, max_quota: int = 10_000, progress_callback=None) -> DiscoveryStats:
+    async def discover(self, max_quota: int = 10_000, progress_callback=None, custom_keywords: list[str] | None = None) -> DiscoveryStats:
         """
         Execute smart query-based discovery.
 
@@ -79,19 +79,30 @@ class DiscoveryEngine:
         Args:
             max_quota: Maximum quota units to use
             progress_callback: Optional async function to call with progress updates
+            custom_keywords: Optional list of keywords to search (overrides default keyword loading)
 
         Returns:
             Discovery statistics
         """
         start_time = datetime.now(UTC)
         today = start_time.strftime("%Y-%m-%d")
-        logger.info(f"=== SMART DISCOVERY (quota={max_quota}) ===")
 
-        # Get today's search plan
-        search_plan = self.randomizer.get_daily_search_plan(
-            max_quota=max_quota,
-            pages_per_keyword=1,  # 1 page per keyword for variety!
-        )
+        if custom_keywords:
+            logger.info(f"=== IP-SPECIFIC DISCOVERY (quota={max_quota}, keywords={len(custom_keywords)}) ===")
+            # Create custom randomizer with IP-specific keywords
+            from app.core.search_randomizer import SearchRandomizer
+            custom_randomizer = SearchRandomizer(keywords=custom_keywords, firestore_client=self.processor.firestore)
+            search_plan = custom_randomizer.get_daily_search_plan(
+                max_quota=max_quota,
+                pages_per_keyword=1,
+            )
+        else:
+            logger.info(f"=== SMART DISCOVERY (quota={max_quota}) ===")
+            # Get today's search plan from default randomizer
+            search_plan = self.randomizer.get_daily_search_plan(
+                max_quota=max_quota,
+                pages_per_keyword=1,  # 1 page per keyword for variety!
+            )
 
         unique_keywords = list(set(p.query for p in search_plan))
         logger.info(

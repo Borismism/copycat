@@ -17,6 +17,7 @@ class VideoStatus(str, Enum):
     PROCESSING = "processing"
     ANALYZED = "analyzed"
     FAILED = "failed"
+    INACCESSIBLE = "inaccessible"
 
 
 class ServiceStatus(str, Enum):
@@ -51,7 +52,7 @@ class VideoMetadata(BaseModel):
     title: str
     channel_id: str
     channel_title: str
-    published_at: datetime
+    published_at: datetime | None = None
     description: str | None = None
     view_count: int = 0
     like_count: int = 0
@@ -212,6 +213,18 @@ class DiscoveryAnalytics(BaseModel):
     channel_count_by_tier: ChannelStats
 
 
+class DailyStats(BaseModel):
+    """Pre-aggregated daily statistics for fast time-range queries."""
+
+    date: str  # YYYY-MM-DD format
+    videos_discovered: int = 0
+    videos_analyzed: int = 0
+    infringements_found: int = 0
+    quota_used: int = 0
+    channels_tracked: int = 0
+    created_at: datetime
+
+
 # ============================================================================
 # System Status Models
 # ============================================================================
@@ -272,6 +285,7 @@ class UserRole(str, Enum):
     EDITOR = "editor"  # Start scans, edit configs, manage channels
     LEGAL = "legal"  # Edit legal fields (action_status, notes, enforcement)
     READ = "read"  # View-only access
+    CLIENT = "client"  # External client view - simplified dashboard without costs/quota
     BLOCKED = "blocked"  # No access - must be explicitly granted a role
 
 

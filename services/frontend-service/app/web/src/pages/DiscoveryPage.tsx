@@ -11,6 +11,8 @@ export default function DiscoveryPage() {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [maxQuotaInput, setMaxQuotaInput] = useState<string>('1000')
+  const [selectedIpId, setSelectedIpId] = useState<string>('') // Empty = all IPs
+  const [ipConfigs, setIpConfigs] = useState<any[]>([])
 
   // Discovery history state
   const [history, setHistory] = useState<any[]>([])
@@ -87,6 +89,20 @@ export default function DiscoveryPage() {
       setHistoryLoading(false)
     }
   }, [historyLimit])
+
+  // Load IP configs on mount
+  useEffect(() => {
+    const loadIPConfigs = async () => {
+      try {
+        const response = await fetch('/api/config')
+        const data = await response.json()
+        setIpConfigs(data.configs || [])
+      } catch (err) {
+        console.error('Failed to load IP configs:', err)
+      }
+    }
+    loadIPConfigs()
+  }, [])
 
   // Initial history load (once)
   useEffect(() => {
@@ -219,8 +235,9 @@ export default function DiscoveryPage() {
       }
 
       // Use SSE for real-time progress through frontend proxy
+      const ipParam = selectedIpId ? `&ip_id=${encodeURIComponent(selectedIpId)}` : ''
       const eventSource = new EventSource(
-        `/api/discovery/trigger/stream?max_quota=${quotaValue}`
+        `/api/discovery/trigger/stream?max_quota=${quotaValue}${ipParam}`
       )
 
       eventSource.onmessage = (event) => {
@@ -314,6 +331,24 @@ export default function DiscoveryPage() {
         {/* Discovery Trigger Controls - Prominent */}
         <div className="flex items-center gap-6 bg-white p-6 rounded-lg shadow-sm border border-gray-200">
           <div className="flex-1">
+            <label htmlFor="ipSelect" className="block text-sm font-medium text-gray-700 mb-2">
+              IP Config (Optional)
+            </label>
+            <select
+              id="ipSelect"
+              value={selectedIpId}
+              onChange={(e) => setSelectedIpId(e.target.value)}
+              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed mb-4"
+              disabled={running || (user?.role === 'read' || user?.role === 'legal')}
+            >
+              <option value="">All IPs (Default)</option>
+              {ipConfigs.map((config) => (
+                <option key={config.id} value={config.id}>
+                  {config.name} ({config.search_keywords?.length || 0} keywords)
+                </option>
+              ))}
+            </select>
+
             <label htmlFor="quotaLimit" className="block text-sm font-medium text-gray-700 mb-2">
               Max Quota Limit
             </label>
