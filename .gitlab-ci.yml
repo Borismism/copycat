@@ -74,7 +74,9 @@ detect-changes:
     reports:
       dotenv: detect.env
   rules:
-    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "develop")
+    # Only auto-deploy from develop branch (dev environment)
+    # main branch requires separate prod environment setup
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"
       changes:
         - services/**/*
         - terraform/**/*
