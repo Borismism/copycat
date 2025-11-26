@@ -5,8 +5,12 @@ stages:
 
 variables:
   TF_IN_AUTOMATION: "true"
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
 
 .gcp-auth: &gcp-auth
+  services:
+    - docker:dind
   before_script:
     - echo "$GCP_SERVICE_ACCOUNT_KEY" | base64 -d > /tmp/gcp-key.json
     - gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
@@ -46,9 +50,9 @@ deploy-infra:
   image: google/cloud-sdk:slim
   <<: *gcp-auth
   script:
-    - apt-get update && apt-get install -y unzip
+    - apt-get update && apt-get install -y unzip docker.io
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip terraform.zip && mv terraform /usr/local/bin/
+    - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - chmod +x deploy.sh
     - ./deploy.sh infra dev
   needs:
@@ -70,9 +74,9 @@ deploy-services:
         echo "No services to deploy"
         exit 0
       fi
-    - apt-get update && apt-get install -y unzip curl
+    - apt-get update && apt-get install -y unzip curl docker.io
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip terraform.zip && mv terraform /usr/local/bin/
+    - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
     - chmod +x deploy.sh
@@ -96,9 +100,9 @@ deploy-services:
   image: google/cloud-sdk:slim
   <<: *gcp-auth
   script:
-    - apt-get update && apt-get install -y unzip curl
+    - apt-get update && apt-get install -y unzip curl docker.io
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip terraform.zip && mv terraform /usr/local/bin/
+    - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
     - chmod +x deploy.sh
@@ -142,9 +146,9 @@ deploy-all-dev:
   image: google/cloud-sdk:slim
   <<: *gcp-auth
   script:
-    - apt-get update && apt-get install -y unzip curl
+    - apt-get update && apt-get install -y unzip curl docker.io
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip terraform.zip && mv terraform /usr/local/bin/
+    - unzip -o terraform.zip && mv -f terraform /usr/local/bin/
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
     - chmod +x deploy.sh
