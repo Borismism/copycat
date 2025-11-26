@@ -52,7 +52,8 @@ deploy-infra:
     - chmod +x deploy.sh
     - ./deploy.sh infra dev
   needs:
-    - detect-changes
+    - job: detect-changes
+      optional: true
   rules:
     - if: $DEPLOY_INFRA == "true"
   environment:
@@ -81,7 +82,8 @@ deploy-services:
         ./deploy.sh $SERVICE dev
       done
   needs:
-    - detect-changes
+    - job: detect-changes
+      optional: true
   rules:
     - if: $SERVICES != ""
   environment:
