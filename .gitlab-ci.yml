@@ -27,7 +27,7 @@ detect-changes:
       else
         echo "DEPLOY_INFRA=false" >> detect.env
       fi
-    - CHANGED_SERVICES=$(echo "$CHANGED_FILES" | grep '^services/' | cut -d'/' -f2 | sort -u | tr '\n' ' ' | xargs)
+    - CHANGED_SERVICES=$(echo "$CHANGED_FILES" | grep '^services/' | cut -d'/' -f2 | sort -u | tr '\n' ' ' | xargs || echo "")
     - echo "SERVICES=$CHANGED_SERVICES" >> detect.env
     - cat detect.env
   artifacts:
