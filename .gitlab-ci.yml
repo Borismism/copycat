@@ -4,106 +4,61 @@ stages:
   - deploy-services
 
 variables:
-  # GCP Configuration - set these in GitLab CI/CD Variables
-  # GCP_PROJECT_ID_DEV: your-dev-project
-  # GCP_PROJECT_ID_PROD: your-prod-project
-  # GCP_SERVICE_ACCOUNT_KEY: base64-encoded service account JSON
-  # GCP_REGION: europe-west4
   TF_IN_AUTOMATION: "true"
 
 .gcp-auth: &gcp-auth
   before_script:
     - echo "$GCP_SERVICE_ACCOUNT_KEY" | base64 -d > /tmp/gcp-key.json
     - gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
-    - |
-      if [ "$ENVIRONMENT" = "prod" ]; then
-        gcloud config set project $GCP_PROJECT_ID_PROD
-      else
-        gcloud config set project $GCP_PROJECT_ID_DEV
-      fi
+    - gcloud config set project $GCP_PROJECT_ID_DEV
     - gcloud auth configure-docker europe-west4-docker.pkg.dev
 
-# Detect changes and set environment
+# Detect changes
 detect-changes:
   stage: detect
   image: alpine:latest
   script:
-    - apk add --no-cache git jq
-    # Determine environment
+    - apk add --no-cache git
+    - git fetch origin develop --depth=2 || true
+    - CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
     - |
-      if [ -n "$MANUAL_TARGET" ]; then
-        ENV="$MANUAL_ENVIRONMENT"
-      elif [ "$CI_COMMIT_BRANCH" = "main" ]; then
-        ENV="prod"
+      if echo "$CHANGED_FILES" | grep -q '^terraform/'; then
+        echo "DEPLOY_INFRA=true" >> detect.env
       else
-        ENV="dev"
+        echo "DEPLOY_INFRA=false" >> detect.env
       fi
-      echo "ENVIRONMENT=$ENV" >> detect.env
-    # Detect changes
-    - |
-      if [ -n "$MANUAL_TARGET" ]; then
-        # Manual trigger
-        if [ "$MANUAL_TARGET" = "infra" ]; then
-          echo "DEPLOY_INFRA=true" >> detect.env
-          echo "SERVICES=" >> detect.env
-        elif [ "$MANUAL_TARGET" = "all" ]; then
-          echo "DEPLOY_INFRA=false" >> detect.env
-          echo "SERVICES=api-service discovery-service risk-analyzer-service vision-analyzer-service frontend-service" >> detect.env
-        else
-          echo "DEPLOY_INFRA=false" >> detect.env
-          echo "SERVICES=$MANUAL_TARGET" >> detect.env
-        fi
-      else
-        # Auto trigger - detect changed files
-        git fetch origin $CI_DEFAULT_BRANCH --depth=2 || true
-        CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only $CI_DEFAULT_BRANCH HEAD)
-
-        # Check for terraform changes
-        if echo "$CHANGED_FILES" | grep -q '^terraform/'; then
-          echo "DEPLOY_INFRA=true" >> detect.env
-        else
-          echo "DEPLOY_INFRA=false" >> detect.env
-        fi
-
-        # Detect changed services
-        CHANGED_SERVICES=$(echo "$CHANGED_FILES" | grep '^services/' | cut -d'/' -f2 | sort -u | tr '\n' ' ' | xargs)
-        echo "SERVICES=$CHANGED_SERVICES" >> detect.env
-      fi
+    - CHANGED_SERVICES=$(echo "$CHANGED_FILES" | grep '^services/' | cut -d'/' -f2 | sort -u | tr '\n' ' ' | xargs)
+    - echo "SERVICES=$CHANGED_SERVICES" >> detect.env
     - cat detect.env
   artifacts:
     reports:
       dotenv: detect.env
   rules:
-    # Only auto-deploy from develop branch (dev environment)
-    # main branch requires separate prod environment setup
     - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"
       changes:
         - services/**/*
         - terraform/**/*
         - deploy.sh
-    - if: $CI_PIPELINE_SOURCE == "web"  # Manual trigger
-    - if: $CI_PIPELINE_SOURCE == "api"  # API trigger
 
-# Deploy global infrastructure
+# Deploy infrastructure (auto)
 deploy-infra:
   stage: deploy-infra
   image: google/cloud-sdk:slim
   <<: *gcp-auth
   script:
     - apt-get update && apt-get install -y unzip
-    # Install Terraform
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
     - unzip terraform.zip && mv terraform /usr/local/bin/
     - chmod +x deploy.sh
-    - ./deploy.sh infra $ENVIRONMENT
+    - ./deploy.sh infra dev
   needs:
     - detect-changes
   rules:
     - if: $DEPLOY_INFRA == "true"
   environment:
-    name: $ENVIRONMENT
+    name: dev
 
-# Deploy services - generates child pipeline for parallel deployment
+# Deploy services (auto)
 deploy-services:
   stage: deploy-services
   image: google/cloud-sdk:slim
@@ -115,27 +70,24 @@ deploy-services:
         exit 0
       fi
     - apt-get update && apt-get install -y unzip curl
-    # Install Terraform
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
     - unzip terraform.zip && mv terraform /usr/local/bin/
-    # Install uv
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
     - chmod +x deploy.sh
-    # Deploy each service
     - |
       for SERVICE in $SERVICES; do
-        echo "Deploying $SERVICE to $ENVIRONMENT..."
-        ./deploy.sh $SERVICE $ENVIRONMENT
+        echo "Deploying $SERVICE to dev..."
+        ./deploy.sh $SERVICE dev
       done
   needs:
     - detect-changes
   rules:
     - if: $SERVICES != ""
   environment:
-    name: $ENVIRONMENT
+    name: dev
 
-# Manual deployment job templates
+# Manual deployment jobs
 .manual-deploy:
   when: manual
   stage: deploy-services
@@ -148,124 +100,45 @@ deploy-services:
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
     - chmod +x deploy.sh
-    - ./deploy.sh $SERVICE_NAME $DEPLOY_ENV
+    - ./deploy.sh $SERVICE_NAME dev
+  environment:
+    name: dev
 
-# Manual deployment to dev
 deploy-api-dev:
   extends: .manual-deploy
   variables:
     SERVICE_NAME: api-service
-    DEPLOY_ENV: dev
-    ENVIRONMENT: dev
-  environment:
-    name: dev
 
 deploy-discovery-dev:
   extends: .manual-deploy
   variables:
     SERVICE_NAME: discovery-service
-    DEPLOY_ENV: dev
-    ENVIRONMENT: dev
-  environment:
-    name: dev
 
 deploy-risk-analyzer-dev:
   extends: .manual-deploy
   variables:
     SERVICE_NAME: risk-analyzer-service
-    DEPLOY_ENV: dev
-    ENVIRONMENT: dev
-  environment:
-    name: dev
 
 deploy-vision-analyzer-dev:
   extends: .manual-deploy
   variables:
     SERVICE_NAME: vision-analyzer-service
-    DEPLOY_ENV: dev
-    ENVIRONMENT: dev
-  environment:
-    name: dev
 
 deploy-frontend-dev:
   extends: .manual-deploy
   variables:
     SERVICE_NAME: frontend-service
-    DEPLOY_ENV: dev
-    ENVIRONMENT: dev
-  environment:
-    name: dev
 
-deploy-infra-dev:
+deploy-infra-manual:
   extends: .manual-deploy
   variables:
     SERVICE_NAME: infra
-    DEPLOY_ENV: dev
-    ENVIRONMENT: dev
-  environment:
-    name: dev
 
-# Manual deployment to prod
-deploy-api-prod:
-  extends: .manual-deploy
-  variables:
-    SERVICE_NAME: api-service
-    DEPLOY_ENV: prod
-    ENVIRONMENT: prod
-  environment:
-    name: prod
-
-deploy-discovery-prod:
-  extends: .manual-deploy
-  variables:
-    SERVICE_NAME: discovery-service
-    DEPLOY_ENV: prod
-    ENVIRONMENT: prod
-  environment:
-    name: prod
-
-deploy-risk-analyzer-prod:
-  extends: .manual-deploy
-  variables:
-    SERVICE_NAME: risk-analyzer-service
-    DEPLOY_ENV: prod
-    ENVIRONMENT: prod
-  environment:
-    name: prod
-
-deploy-vision-analyzer-prod:
-  extends: .manual-deploy
-  variables:
-    SERVICE_NAME: vision-analyzer-service
-    DEPLOY_ENV: prod
-    ENVIRONMENT: prod
-  environment:
-    name: prod
-
-deploy-frontend-prod:
-  extends: .manual-deploy
-  variables:
-    SERVICE_NAME: frontend-service
-    DEPLOY_ENV: prod
-    ENVIRONMENT: prod
-  environment:
-    name: prod
-
-deploy-infra-prod:
-  extends: .manual-deploy
-  variables:
-    SERVICE_NAME: infra
-    DEPLOY_ENV: prod
-    ENVIRONMENT: prod
-  environment:
-    name: prod
-
-# Deploy all services
 deploy-all-dev:
-  extends: .manual-deploy
-  variables:
-    DEPLOY_ENV: dev
-    ENVIRONMENT: dev
+  when: manual
+  stage: deploy-services
+  image: google/cloud-sdk:slim
+  <<: *gcp-auth
   script:
     - apt-get update && apt-get install -y unzip curl
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
@@ -276,19 +149,3 @@ deploy-all-dev:
     - for svc in api-service discovery-service risk-analyzer-service vision-analyzer-service frontend-service; do ./deploy.sh $svc dev; done
   environment:
     name: dev
-
-deploy-all-prod:
-  extends: .manual-deploy
-  variables:
-    DEPLOY_ENV: prod
-    ENVIRONMENT: prod
-  script:
-    - apt-get update && apt-get install -y unzip curl
-    - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip terraform.zip && mv terraform /usr/local/bin/
-    - curl -LsSf https://astral.sh/uv/install.sh | sh
-    - export PATH="$HOME/.local/bin:$PATH"
-    - chmod +x deploy.sh
-    - for svc in api-service discovery-service risk-analyzer-service vision-analyzer-service frontend-service; do ./deploy.sh $svc prod; done
-  environment:
-    name: prod
