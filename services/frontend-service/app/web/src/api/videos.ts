@@ -5,6 +5,7 @@ export interface VideoListParams {
   status?: VideoStatus
   has_ip_match?: boolean
   channel_id?: string
+  infringement_status?: string  // actionable|tolerated|clean
   sort_by?: string
   sort_desc?: boolean
   limit?: number

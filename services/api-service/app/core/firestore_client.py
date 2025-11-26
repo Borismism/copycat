@@ -47,6 +47,7 @@ class FirestoreClient:
         sort_desc: bool = True,
         limit: int = 20,
         offset: int = 0,
+        infringement_status: str | None = None,
     ) -> tuple[list[VideoMetadata], int]:
         """
         List videos with filters and pagination.
@@ -55,6 +56,7 @@ class FirestoreClient:
             status: Filter by video status
             has_ip_match: Filter by IP match presence
             channel_id: Filter by channel ID
+            infringement_status: Filter by infringement status (actionable|tolerated|clean)
             sort_by: Field to sort by
             sort_desc: Sort descending
             limit: Maximum results
@@ -74,6 +76,9 @@ class FirestoreClient:
                 query = query.where("matched_ips", "!=", [])
         if channel_id:
             query = query.where("channel_id", "==", channel_id)
+        if infringement_status:
+            # Filter by infringement_status: actionable|tolerated|clean
+            query = query.where("infringement_status", "==", infringement_status)
 
         # Sort
         direction = firestore.Query.DESCENDING if sort_desc else firestore.Query.ASCENDING

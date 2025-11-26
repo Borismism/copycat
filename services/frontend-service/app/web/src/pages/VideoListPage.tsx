@@ -50,6 +50,7 @@ export default function VideoListPage() {
   const [channelFilter, setChannelFilter] = useState<string>(searchParams.get('channel') || '')
   const [statusFilter, setStatusFilter] = useState<VideoStatus | ''>(searchParams.get('status') as VideoStatus || '')
   const [ipConfigFilter, setIpConfigFilter] = useState<string>(searchParams.get('ip_config') || '')
+  const [infringementFilter, setInfringementFilter] = useState<string>(searchParams.get('infringement') || '')
 
   const limit = 20
 
@@ -111,41 +112,73 @@ export default function VideoListPage() {
     const channel = searchParams.get('channel') || ''
     const status = searchParams.get('status') as VideoStatus || ''
     const ipConfig = searchParams.get('ip_config') || ''
+    const infringement = searchParams.get('infringement') || ''
 
     setChannelFilter(channel)
     setStatusFilter(status)
     setIpConfigFilter(ipConfig)
+    setInfringementFilter(infringement)
   }, [searchParams])
 
   useEffect(() => {
     loadVideos()
-  }, [page, sortBy, sortDesc, channelFilter, statusFilter, ipConfigFilter])
+  }, [page, sortBy, sortDesc, channelFilter, statusFilter, ipConfigFilter, infringementFilter])
 
   const loadVideos = async () => {
     try {
       setLoading(true)
-      const data = await videosAPI.list({
-        limit: ipConfigFilter ? 1000 : limit, // Load more if filtering by IP config
-        offset: ipConfigFilter ? 0 : page * limit,
-        sort_by: sortBy,
-        sort_desc: sortDesc,
-        channel_id: channelFilter || undefined,
-        status: statusFilter || undefined,
-        has_ip_match: true, // Only show videos with IP configs (can be scanned)
-      })
+      // Check if we need client-side filtering (only for IP config now)
+      const needsClientFilter = ipConfigFilter
 
-      // Filter by IP config on client side if selected
-      let filteredVideos = data.videos
-      if (ipConfigFilter) {
-        filteredVideos = data.videos.filter(video =>
+      if (needsClientFilter) {
+        // For IP config filtering, we need to load more and filter client-side
+        let allVideos: VideoMetadata[] = []
+        let currentOffset = 0
+        const batchSize = 100
+        const maxVideos = 500
+
+        while (allVideos.length < maxVideos) {
+          const data = await videosAPI.list({
+            limit: batchSize,
+            offset: currentOffset,
+            sort_by: sortBy,
+            sort_desc: sortDesc,
+            channel_id: channelFilter || undefined,
+            status: statusFilter || undefined,
+            infringement_status: infringementFilter || undefined,
+            has_ip_match: true,
+          })
+
+          allVideos = [...allVideos, ...data.videos]
+
+          if (!data.has_more || data.videos.length < batchSize) {
+            break
+          }
+          currentOffset += batchSize
+        }
+
+        // Filter by IP config client-side
+        let filteredVideos = allVideos.filter(video =>
           video.matched_ips && video.matched_ips.includes(ipConfigFilter)
         )
+
         // Apply client-side pagination
         const start = page * limit
         const end = start + limit
         setVideos(filteredVideos.slice(start, end))
         setTotal(filteredVideos.length)
       } else {
+        // Server-side filtering and pagination (FAST!)
+        const data = await videosAPI.list({
+          limit: limit,
+          offset: page * limit,
+          sort_by: sortBy,
+          sort_desc: sortDesc,
+          channel_id: channelFilter || undefined,
+          status: statusFilter || undefined,
+          infringement_status: infringementFilter || undefined,
+          has_ip_match: true,
+        })
         setVideos(data.videos)
         setTotal(data.total)
       }
@@ -162,7 +195,7 @@ export default function VideoListPage() {
     setPage(0)
   }
 
-  const handleFilterChange = (type: 'channel' | 'status' | 'ip_config', value: string) => {
+  const handleFilterChange = (type: 'channel' | 'status' | 'ip_config' | 'infringement', value: string) => {
     const params = new URLSearchParams(searchParams)
 
     if (type === 'channel') {
@@ -186,6 +219,13 @@ export default function VideoListPage() {
         params.delete('ip_config')
       }
       setIpConfigFilter(value)
+    } else if (type === 'infringement') {
+      if (value) {
+        params.set('infringement', value)
+      } else {
+        params.delete('infringement')
+      }
+      setInfringementFilter(value)
     }
 
     setSearchParams(params)
@@ -197,6 +237,7 @@ export default function VideoListPage() {
     setChannelFilter('')
     setStatusFilter('')
     setIpConfigFilter('')
+    setInfringementFilter('')
     setPage(0)
   }
 
@@ -232,7 +273,7 @@ export default function VideoListPage() {
     setModalVideoId(videoId)
   }
 
-  const activeFiltersCount = [channelFilter, statusFilter, ipConfigFilter].filter(Boolean).length
+  const activeFiltersCount = [channelFilter, statusFilter, ipConfigFilter, infringementFilter].filter(Boolean).length
 
   if (error) {
     return (
@@ -673,6 +714,23 @@ export default function VideoListPage() {
                 <option value="processing">Processing</option>
                 <option value="analyzed">Analyzed</option>
                 <option value="failed">Failed</option>
+              </select>
+            </div>
+
+            {/* Infringement Filter */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1.5">
+                Infringement Status
+              </label>
+              <select
+                value={infringementFilter}
+                onChange={(e) => handleFilterChange('infringement', e.target.value)}
+                className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">All analyzed</option>
+                <option value="actionable">🚨 Not Tolerated (Actionable)</option>
+                <option value="tolerated">⚠️ Tolerated</option>
+                <option value="clean">✅ Clean (No Infringement)</option>
               </select>
             </div>
           </div>

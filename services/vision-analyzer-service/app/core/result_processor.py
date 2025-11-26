@@ -215,6 +215,18 @@ class ResultProcessor:
                     view_count = video_data.get("view_count", 0)
 
             # 2. Now update the document with new analysis
+            # Determine infringement_status for fast filtering:
+            # - "actionable" = has infringement AND needs action (immediate_takedown, monitor)
+            # - "tolerated" = has infringement BUT tolerated (no action needed)
+            # - "clean" = no infringement detected
+            if has_infringement:
+                if result.analysis.overall_recommendation in ("immediate_takedown", "monitor"):
+                    infringement_status = "actionable"
+                else:
+                    infringement_status = "tolerated"
+            else:
+                infringement_status = "clean"
+
             doc_ref.update({
                 "analysis": {
                     "analyzed_at": result.analyzed_at,
@@ -228,6 +240,7 @@ class ResultProcessor:
                 },
                 "status": "analyzed",
                 "last_analyzed_at": result.analyzed_at,
+                "infringement_status": infringement_status,  # For fast filtering: actionable|tolerated|clean
             })
 
             logger.debug(f"Stored multi-IP result in Firestore: {result.video_id}")

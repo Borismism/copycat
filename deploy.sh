@@ -137,8 +137,8 @@ build_and_push_image() {
 
     log_info "Building Docker image for $service..." >&2
 
-    # Calculate source hash
-    local source_hash=$(find "$service_dir/app" -type f -name "*.py" -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 | head -c 8)
+    # Calculate source hash (include both Python and TypeScript/JS files for frontend)
+    local source_hash=$(find "$service_dir/app" -type f \( -name "*.py" -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 | head -c 8)
     local git_sha=$(git rev-parse --short HEAD)
     local image_tag="${git_sha}-${source_hash}"
     local image_url="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${service}:${image_tag}"

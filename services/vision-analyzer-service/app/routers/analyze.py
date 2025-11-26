@@ -317,7 +317,41 @@ async def analyze_video(request: Request):
             error_type = type(e).__name__
 
             # Check for different error types and return appropriate HTTP codes
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            if "Insufficient budget" in error_str:
+                # Budget exhausted - return 200 (don't retry, budget won't reset until tomorrow)
+                # Reset video status back to scan_ready so it can be retried tomorrow
+                logger.warning(f"Budget exhausted for video {video_id}, resetting to scan_ready")
+                try:
+                    doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(video_id)
+                    doc_ref.update({
+                        "status": "scan_ready",  # Reset to allow retry after budget reset
+                        "budget_exhausted_at": firestore.SERVER_TIMESTAMP
+                    })
+                except Exception as update_error:
+                    logger.warning(f"Failed to reset video status: {update_error}")
+
+                # Clean up scan_history if created
+                if scan_id:
+                    try:
+                        firestore_client.collection("scan_history").document(scan_id).update({
+                            "status": "deferred",
+                            "completed_at": firestore.SERVER_TIMESTAMP,
+                            "error_message": "Budget exhausted - will retry after reset",
+                        })
+                    except Exception as update_error:
+                        logger.warning(f"Failed to update scan history: {update_error}")
+
+                return Response(
+                    content=json.dumps({
+                        "status": "budget_exhausted",
+                        "video_id": video_id,
+                        "message": "Daily budget exhausted - video reset to scan_ready for tomorrow"
+                    }),
+                    status_code=200,  # Don't retry - budget won't reset until midnight
+                    media_type="application/json"
+                )
+
+            elif "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                 # Rate limit - return 429 for PubSub retry
                 logger.warning(f"Rate limited for video {video_id}, returning 429 for retry")
                 # Don't update status - stay "processing" during retries
@@ -366,6 +400,14 @@ async def analyze_video(request: Request):
                     status_code=503,  # PubSub will retry
                     media_type="application/json"
                 )
+
+            elif "exceeds Gemini" in error_str and "maximum" in error_str:
+                # Video too long - permanent failure, mark as failed
+                video_status = "failed"
+                scan_status = "failed"
+                error_message = f"Video too long for analysis: {error_str[:200]}"
+                logger.warning(f"Video {video_id} too long for Gemini analysis")
+                response_code = 200  # Don't retry - video length won't change
 
             elif error_type == "ValueError" and "Invalid JSON" in error_str:
                 # Gemini returned malformed JSON - permanent failure (won't fix itself on retry)

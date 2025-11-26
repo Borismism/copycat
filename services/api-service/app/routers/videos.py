@@ -35,6 +35,7 @@ async def list_videos(
     status: VideoStatus | None = Query(None, description="Filter by video status"),
     has_ip_match: bool | None = Query(None, description="Filter by IP match presence"),
     channel_id: str | None = Query(None, description="Filter by channel ID"),
+    infringement_status: str | None = Query(None, description="Filter by infringement status: actionable|tolerated|clean"),
     sort_by: str = Query("discovered_at", description="Field to sort by"),
     sort_desc: bool = Query(True, description="Sort descending"),
     limit: int = Query(20, ge=1, le=100, description="Maximum results per page"),
@@ -47,6 +48,7 @@ async def list_videos(
         status: Filter by processing status
         has_ip_match: Filter by IP match presence
         channel_id: Filter by channel
+        infringement_status: Filter by infringement status (actionable=needs action, tolerated=ok, clean=no infringement)
         sort_by: Sort field (discovered_at, view_count, etc.)
         sort_desc: Sort descending
         limit: Results per page
@@ -60,6 +62,7 @@ async def list_videos(
             status=status,
             has_ip_match=has_ip_match,
             channel_id=channel_id,
+            infringement_status=infringement_status,
             sort_by=sort_by,
             sort_desc=sort_desc,
             limit=limit,
