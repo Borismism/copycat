@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.routers import (
+    admin,
     analytics,
     channels,
     config,
@@ -100,6 +101,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(status.router, prefix="/api/status", tags=["Status"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(discovery.router, prefix="/api/discovery", tags=["Discovery"])
 app.include_router(channels.router, prefix="/api/channels", tags=["Channels"])
 app.include_router(videos.router, prefix="/api/videos", tags=["Videos"])
@@ -128,3 +130,4 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy", "service": "api-service"}
+# test
