@@ -1,128 +1,71 @@
-# Copycat - AI Copyright Detection System
+# Copycat
 
-AI-powered copyright violation detection targeting AI-generated Justice League content at scale.
+An AI-powered system for detecting unauthorized use of copyrighted characters in AI-generated videos on YouTube. Built to monitor for Justice League characters (Superman, Batman, Wonder Woman, Flash, Aquaman, Cyborg, Green Lantern) appearing in content created by AI video generators like Sora, Runway, Kling, and Pika.
 
-## 🚀 Quick Start
+## How It Works
 
-```bash
-# Start local environment (from project root)
-./scripts/dev-local.sh
+The system runs as a pipeline of microservices on Google Cloud:
 
-# Access services
-open http://localhost:8080/docs  # Discovery Service API
-```
+1. **[Discovery Service](services/discovery-service/README.md)** - Continuously scans YouTube for new AI-generated videos using keyword searches and channel tracking
+2. **[Risk Analyzer](services/risk-analyzer-service/README.md)** - Scores videos based on multiple factors (channel history, view velocity, metadata signals) to prioritize what gets analyzed
+3. **[Vision Analyzer](services/vision-analyzer-service/README.md)** - Uses Gemini 2.5 Flash to analyze video content and detect character appearances
 
-**That's it!** All emulators and services start automatically.
+Videos flagged as potential infringements are stored in Firestore with detailed analysis results for review through the **[Frontend](services/frontend-service/README.md)** dashboard, served via the **[API Service](services/api-service/README.md)**.
 
-## 📋 Prerequisites
-
-- **Docker Desktop** installed and running
-- **YouTube API Key**: Already configured in `.env`
-
-## 🏗️ Architecture
-
-```
-COPYCAT PIPELINE
-
-1. Discovery Service (PORT 8080) ✅ COMPLETE
-   ↓ Finds AI-generated Justice League videos
-   ↓ Publishes to: discovered-videos topic
-
-2. Risk Scorer Service (PORT 8081) [TODO]
-3. Chapter Extractor Service (PORT 8082) [TODO]
-4. Frame Extractor Service (PORT 8083) [TODO]
-5. Vision Analyzer Service (PORT 8084) [TODO]
-```
-
-### Infrastructure (Shared Emulators)
-
-- **Firestore** (port 8200) - Document database
-- **PubSub** (port 8085) - Event messaging
-- **Cloud Storage** (port 4443) - Frame storage
-
-## 🔧 Development
+## Deployment
 
 ```bash
-# Start environment
-./scripts/dev-local.sh
+# Deploy a service to dev environment
+./deploy.sh <service-name> dev
 
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
+# Deploy to production
+./deploy.sh <service-name> prod
 ```
 
-### Hot Reload
+Or push to `develop` (deploys to dev) or `main` (deploys to prod) - CI/CD handles the rest.
 
-Edit any Python file in `services/*/app/` - service auto-restarts!
-
-### Run Tests
-
-```bash
-cd services/discovery-service
-uv run pytest -v --cov
-# 165 tests, 95% coverage
-```
-
-### API Testing
-
-```bash
-curl http://localhost:8080/health
-curl -X POST http://localhost:8080/discover
-curl http://localhost:8080/discover/channels
-```
-
-## 📁 Structure
+## Project Structure
 
 ```
 copycat/
-├── docker-compose.yml       # All services + emulators
-├── .env                     # API keys (gitignored)
-├── scripts/
-│   ├── dev-local.sh        # Start local environment
-│   ├── init-pubsub.sh      # Initialize PubSub
-│   └── deploy-service.sh   # Deploy to GCP
-└── services/
-    ├── discovery-service/  # ✅ COMPLETE (160 LOC, 95% coverage)
-    └── [other services]    # 🚧 TODO
+├── services/
+│   ├── api-service/             # REST API gateway
+│   ├── discovery-service/       # YouTube video discovery
+│   ├── risk-analyzer-service/   # Risk scoring and prioritization
+│   ├── vision-analyzer-service/ # Gemini-based video analysis
+│   └── frontend-service/        # React dashboard
+├── terraform/                   # Shared GCP infrastructure
+├── scripts/                     # Utility scripts
+└── deploy.sh                    # Deployment script
 ```
 
-## 🎯 Discovery Service Features
+## Documentation
 
-- **Smart Orchestration**: 70% channels, 20% trending, 10% keywords
-- **Channel Intelligence**: 5-tier system (Platinum → Ignore)
-- **Quota Management**: 10,000 units/day with 80% warning
-- **Deduplication**: 30-day Firestore lookback
-- **View Velocity**: Trending score 0-100
+| Document | Description |
+|----------|-------------|
+| [API Service](services/api-service/README.md) | REST API gateway, authentication, RBAC |
+| [Discovery Service](services/discovery-service/README.md) | YouTube scanning, channel tracking, quota management |
+| [Risk Analyzer](services/risk-analyzer-service/README.md) | Priority scoring, adaptive learning |
+| [Vision Analyzer](services/vision-analyzer-service/README.md) | Gemini analysis, budget management |
+| [Frontend](services/frontend-service/README.md) | React dashboard, IAP authentication |
+| [Terraform](terraform/README.md) | GCP infrastructure (Firestore, Pub/Sub, IAP, etc.) |
+| [CLAUDE.md](CLAUDE.md) | Development guidelines |
 
-## 🚀 Deployment
+## Architecture
 
-```bash
-# Setup GCP (run once)
-./scripts/setup-infra.sh
+<!-- Add your architecture diagram here -->
+<!-- ![Architecture](docs/architecture.png) -->
 
-# Deploy to dev
-./scripts/deploy-service.sh discovery-service dev
+- All services are Python/FastAPI, deployed as Cloud Run containers
+- Services communicate via Pub/Sub (async) and direct HTTP calls (sync)
+- Firestore is the primary database
+- Vision analysis uses Gemini via Vertex AI
+- Frontend protected by Identity-Aware Proxy (IAP)
+- The system processes 20-30k videos/day within a ~$260/day Gemini budget
 
-# Deploy to prod
-./scripts/deploy-service.sh discovery-service prod
-```
+## Configuration
 
-## 📚 Documentation
-
-- [Discovery Service README](services/discovery-service/README.md)
-- [Docker Setup Guide](services/discovery-service/README.docker.md)
-- [Planning Docs](.planning/)
-
-## 🛠️ Tech Stack
-
-- Python 3.13 + UV
-- FastAPI 0.119.1
-- google-genai 1.46.0
-- GCP Cloud Run + Firestore + PubSub
-- Docker Compose
-
----
-
-**Built with Claude Code** 🤖
+Configuration is managed through:
+- Environment variables (set via Terraform/Cloud Run)
+- Firestore documents (runtime config like keywords, channel tiers)
+- Terraform (infrastructure) - see [terraform/README.md](terraform/README.md)
