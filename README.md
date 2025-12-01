@@ -53,8 +53,7 @@ copycat/
 
 ## Architecture
 
-<!-- Add your architecture diagram here -->
-<!-- ![Architecture](docs/architecture.png) -->
+![Architecture](docs/architecture.png)
 
 - All services are Python/FastAPI, deployed as Cloud Run containers
 - Services communicate via Pub/Sub (async) and direct HTTP calls (sync)
