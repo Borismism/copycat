@@ -58,3 +58,10 @@ resource "google_service_account_iam_member" "boris_impersonator" {
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "user:boris@nextnovate.com"
 }
+
+# Grant boris direct owner access to the project
+resource "google_project_iam_member" "boris_owner" {
+  project = var.project_id
+  role    = "roles/owner"
+  member  = "user:boris@nextnovate.com"
+}
