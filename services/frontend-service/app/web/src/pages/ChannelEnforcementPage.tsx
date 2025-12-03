@@ -394,7 +394,7 @@ export default function ChannelEnforcementPage() {
                   <div className="text-sm text-gray-600 mb-1">Total Found</div>
                   <div className="text-3xl font-bold text-blue-600">{selectedChannel.total_videos_found}</div>
                   <div className="text-xs text-gray-500">
-                    {selectedChannel.total_videos_found - selectedChannel.confirmed_infringements - selectedChannel.videos_cleared} unscanned
+                    {Math.max(0, selectedChannel.total_videos_found - selectedChannel.confirmed_infringements - selectedChannel.videos_cleared)} unscanned
                   </div>
                 </div>
               </div>

@@ -80,7 +80,7 @@ export const ChannelCard = memo(function ChannelCard({
     return null
   }, [channel.tier, channel.confirmed_infringements, channel.action_status])
 
-  const unscannedCount = channel.total_videos_found - videosScanned
+  const unscannedCount = Math.max(0, channel.total_videos_found - videosScanned)
 
   return (
     <div
