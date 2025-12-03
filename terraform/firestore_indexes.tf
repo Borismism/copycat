@@ -280,3 +280,106 @@ resource "google_firestore_index" "discovery_history_status_completed_at" {
 # Note: Single-field index for discovered_at is automatically created by Firestore
 # No composite index needed for: .where("discovered_at", ">=", start).order_by("discovered_at")
 # Correct firestore index imported
+
+# Index for infringement_status filter with scan_priority sort
+resource "google_firestore_index" "videos_infringement_status_scan_priority" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  # Index for: .where("infringement_status", "==", "actionable").where("matched_ips", "!=", []).order_by("scan_priority", DESC)
+  fields {
+    field_path = "infringement_status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "scan_priority"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "matched_ips"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
+# ==============================================================================
+# channels collection indexes for enforcement page
+# ==============================================================================
+
+# Index for: .where("action_status", "==", X).order_by("channel_risk", DESC)
+resource "google_firestore_index" "channels_action_status_risk" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "channels"
+
+  fields {
+    field_path = "action_status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "channel_risk"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
+# Index for: .where("action_status", "==", X).order_by("last_seen_at", DESC)
+resource "google_firestore_index" "channels_action_status_last_seen" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "channels"
+
+  fields {
+    field_path = "action_status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "last_seen_at"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
+# Index for: .where("tier", "==", X).where("action_status", "==", Y).order_by("channel_risk", DESC)
+resource "google_firestore_index" "channels_tier_action_status_risk" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "channels"
+
+  fields {
+    field_path = "tier"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "action_status"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "channel_risk"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}

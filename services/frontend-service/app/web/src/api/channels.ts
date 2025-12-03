@@ -4,6 +4,7 @@ import type { ChannelListResponse, ChannelProfile, ChannelStats, ChannelTier } f
 export interface ChannelListParams {
   min_risk?: number
   tier?: ChannelTier
+  action_status?: string
   sort_by?: string
   sort_desc?: boolean
   limit?: number

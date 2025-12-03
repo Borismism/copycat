@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { channelsAPI } from '../api/channels'
-import type { ChannelProfile, ChannelStats, ChannelTier, ActionStatus } from '../types'
+import type { ChannelProfile, ChannelTier, ActionStatus } from '../types'
 import { useAuth } from '../contexts/AuthContext'
 import { usePermissions } from '../hooks/usePermissions'
+import { useChannelList, useChannelStats } from '../hooks/useChannels'
+import { ChannelCard, getTierColor, getActionStatusColor, getActionStatusLabel } from '../components/ChannelCard'
 import ScanProgressNotification from '../components/ScanProgressNotification'
 
 type SortOption = {
@@ -24,63 +25,47 @@ export default function ChannelEnforcementPage() {
   const { user } = useAuth()
   const { canStartScans, canEditChannelEnforcement } = usePermissions()
   const navigate = useNavigate()
-  const [channels, setChannels] = useState<ChannelProfile[]>([])
-  const [, setStats] = useState<ChannelStats | null>(null)
-  const [loading, setLoading] = useState(true)
+
+  // Pagination and sorting state
   const [page, setPage] = useState(0)
-  const [total, setTotal] = useState(0)
   const [sortBy, setSortBy] = useState('risk_score')
   const [sortDesc, setSortDesc] = useState(true)
-  const [toastMessage, setToastMessage] = useState<string | null>(null)
-  const [showProgressNotification, setShowProgressNotification] = useState(false)
 
-  // Scanning state (for button disable)
-  const [activeScans, setActiveScans] = useState<Map<string, { running: boolean }>>(new Map())
-
-  // Filters
+  // Filters - now passed to server for filtering
   const [statusFilter, setStatusFilter] = useState<ActionStatus | ''>('')
   const [tierFilter, setTierFilter] = useState<ChannelTier | ''>('')
   const [assigneeFilter, setAssigneeFilter] = useState('')
 
+  // UI state
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [showProgressNotification, setShowProgressNotification] = useState(false)
+  const [activeScans, setActiveScans] = useState<Map<string, { running: boolean }>>(new Map())
   const [selectedChannel, setSelectedChannel] = useState<ChannelProfile | null>(null)
   const [showActionModal, setShowActionModal] = useState(false)
   const [showDetailsModal, setShowDetailsModal] = useState(false)
 
   const limit = 21
 
-  useEffect(() => {
-    loadData()
-  }, [page, sortBy, sortDesc, statusFilter, tierFilter, assigneeFilter])
+  // Use React Query for data fetching with caching
+  // Stats are loaded ONCE and cached for 60s (doesn't reload on filter changes)
+  const { data: stats } = useChannelStats()
 
-  const loadData = async () => {
-    try {
-      setLoading(true)
-      const [channelsData, statsData] = await Promise.all([
-        channelsAPI.list({ limit, offset: page * limit, sort_by: sortBy, sort_desc: sortDesc }),
-        channelsAPI.getStats(),
-      ])
+  // Channel list with server-side filtering (reloads when filters change)
+  const { data: channelsData, isLoading: loading, refetch } = useChannelList({
+    limit,
+    offset: page * limit,
+    sort_by: sortBy,
+    sort_desc: sortDesc,
+    ...(statusFilter && { action_status: statusFilter }),
+    ...(tierFilter && { tier: tierFilter }),
+  })
 
-      // Apply client-side filtering for mock data
-      let filtered = channelsData.channels
-      if (statusFilter) {
-        filtered = filtered.filter(c => c.action_status === statusFilter)
-      }
-      if (tierFilter) {
-        filtered = filtered.filter(c => c.tier === tierFilter)
-      }
-      if (assigneeFilter) {
-        filtered = filtered.filter(c => c.assigned_to === assigneeFilter)
-      }
+  // Apply assignee filter client-side (not supported by backend yet)
+  const channels = assigneeFilter
+    ? (channelsData?.channels || []).filter(c => c.assigned_to === assigneeFilter)
+    : (channelsData?.channels || [])
 
-      setChannels(filtered)
-      setTotal(channelsData.total)
-      setStats(statsData)
-    } catch (err) {
-      console.error('Failed to load channels:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const total = channelsData?.total || 0
 
   const handleSortChange = (option: SortOption) => {
     setSortBy(option.field)
@@ -88,21 +73,20 @@ export default function ChannelEnforcementPage() {
     setPage(0)
   }
 
-  const handleUpdateChannel = (channelId: string, updates: Partial<ChannelProfile>) => {
+  const handleUpdateChannel = useCallback((channelId: string, updates: Partial<ChannelProfile>) => {
     // Mock update - in production, this would call an API
-    setChannels(prev => prev.map(c =>
-      c.channel_id === channelId ? { ...c, ...updates, last_action_date: new Date().toISOString() } : c
-    ))
+    // After real API call, refetch to get fresh data
     setShowActionModal(false)
     setSelectedChannel(null)
-  }
+    refetch()
+  }, [refetch])
 
-  const showToast = (message: string) => {
+  const showToast = useCallback((message: string) => {
     setToastMessage(message)
     setTimeout(() => setToastMessage(null), 5000)
-  }
+  }, [])
 
-  const handleScanAllVideos = async (channel: ChannelProfile) => {
+  const handleScanAllVideos = useCallback(async (channel: ChannelProfile) => {
     const channelId = channel.channel_id
 
     // Mark as scanning
@@ -117,8 +101,6 @@ export default function ChannelEnforcementPage() {
         throw new Error(`API returned ${response.status}`)
       }
 
-      const result = await response.json()
-
       // Show only the progress notification, not the toast
       setShowProgressNotification(true)
 
@@ -132,7 +114,7 @@ export default function ChannelEnforcementPage() {
       }, 3000)
     } catch (error) {
       console.error('Failed to scan videos:', error)
-      showToast(`❌ Failed to queue videos: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      showToast(`Failed to queue videos: ${error instanceof Error ? error.message : 'Unknown error'}`)
 
       setTimeout(() => {
         setActiveScans(prev => {
@@ -142,9 +124,9 @@ export default function ChannelEnforcementPage() {
         })
       }, 3000)
     }
-  }
+  }, [showToast])
 
-  const handleDeepScan = async (channel: ChannelProfile) => {
+  const handleDeepScan = useCallback(async (channel: ChannelProfile) => {
     const channelId = channel.channel_id
     const maxVideos = 50
 
@@ -160,8 +142,6 @@ export default function ChannelEnforcementPage() {
         throw new Error(`API returned ${response.status}`)
       }
 
-      const result = await response.json()
-
       // Show only the progress notification, not the toast
       setShowProgressNotification(true)
 
@@ -172,11 +152,11 @@ export default function ChannelEnforcementPage() {
           newMap.delete(channelId)
           return newMap
         })
-        window.location.reload()
+        refetch()
       }, 2000)
     } catch (error) {
       console.error('Failed to discover videos:', error)
-      showToast(`❌ Failed to discover videos: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      showToast(`Failed to discover videos: ${error instanceof Error ? error.message : 'Unknown error'}`)
 
       setTimeout(() => {
         setActiveScans(prev => {
@@ -186,36 +166,10 @@ export default function ChannelEnforcementPage() {
         })
       }, 3000)
     }
-  }
+  }, [showToast, refetch])
 
-  const getTierColor = (tier: ChannelTier) => {
-    switch (tier) {
-      case 'critical': return 'bg-red-100 text-red-800 border-red-300'
-      case 'high': return 'bg-orange-100 text-orange-800 border-orange-300'
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-300'
-      case 'low': return 'bg-green-100 text-green-800 border-green-300'
-      case 'minimal': return 'bg-gray-100 text-gray-800 border-gray-300'
-    }
-  }
-
-  const getActionStatusColor = (status?: ActionStatus) => {
-    if (!status) return 'bg-gray-100 text-gray-600 border-gray-300'
-    switch (status) {
-      case 'new': return 'bg-blue-100 text-blue-800 border-blue-300'
-      case 'in_review': return 'bg-yellow-100 text-yellow-800 border-yellow-300'
-      case 'legal_action': return 'bg-red-100 text-red-800 border-red-300'
-      case 'resolved': return 'bg-green-100 text-green-800 border-green-300'
-      case 'monitoring': return 'bg-purple-100 text-purple-800 border-purple-300'
-    }
-  }
-
-  const getActionStatusLabel = (status?: ActionStatus) => {
-    if (!status) return 'Not Reviewed'
-    return status.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-  }
-
-  const getPriorityBadge = (channel: ChannelProfile) => {
-    // High priority: CRITICAL tier + infringements + not resolved
+  // Helper to get priority badge for modals
+  const getPriorityBadge = useCallback((channel: ChannelProfile) => {
     if (channel.tier === 'critical' && channel.confirmed_infringements > 0 && channel.action_status !== 'resolved') {
       return (
         <span className="px-2 py-1 text-xs font-bold bg-red-600 text-white rounded-full animate-pulse">
@@ -223,7 +177,6 @@ export default function ChannelEnforcementPage() {
         </span>
       )
     }
-    // Medium priority: HIGH tier + recent infringements
     if (channel.tier === 'high' && channel.confirmed_infringements > 0 && !channel.action_status) {
       return (
         <span className="px-2 py-1 text-xs font-bold bg-orange-500 text-white rounded-full">
@@ -232,16 +185,7 @@ export default function ChannelEnforcementPage() {
       )
     }
     return null
-  }
-
-  // Calculate pipeline stats
-  const pipelineStats = {
-    new: channels.filter(c => !c.action_status || c.action_status === 'new').length,
-    in_review: channels.filter(c => c.action_status === 'in_review').length,
-    legal_action: channels.filter(c => c.action_status === 'legal_action').length,
-    resolved: channels.filter(c => c.action_status === 'resolved').length,
-    monitoring: channels.filter(c => c.action_status === 'monitoring').length,
-  }
+  }, [])
 
   if (loading && channels.length === 0) {
     return <div className="text-center py-12">Loading...</div>
@@ -332,162 +276,23 @@ export default function ChannelEnforcementPage() {
         </div>
       </div>
 
-      {/* Channel Grid - Simplified Cards */}
+      {/* Channel Grid - Using memoized ChannelCard components */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {channels.map((channel) => {
-          const videosScanned = channel.confirmed_infringements + channel.videos_cleared
-          const infringementRate = videosScanned > 0 ? (channel.confirmed_infringements / videosScanned) * 100 : 0
-
-          return (
-            <div
-              key={channel.channel_id}
-              onClick={() => {
-                setSelectedChannel(channel)
-                setShowDetailsModal(true)
-              }}
-              className="bg-white rounded-lg shadow-lg border border-gray-200 hover:shadow-xl hover:scale-[1.02] transition-all overflow-hidden cursor-pointer"
-            >
-              {/* Header with centered thumbnail */}
-              <div className="bg-gradient-to-br from-red-500 to-red-700 px-5 py-6 border-b border-red-800 relative">
-                {/* Centered Avatar/Thumbnail */}
-                <div className="flex justify-center mb-4">
-                  {channel.thumbnail_url ? (
-                    <img
-                      src={channel.thumbnail_url}
-                      alt={channel.channel_title}
-                      className="w-32 h-32 rounded-full object-cover shadow-2xl border-4 border-white"
-                      referrerPolicy="no-referrer"
-                      crossOrigin="anonymous"
-                      onError={(e) => {
-                        console.error('Image failed to load:', channel.thumbnail_url)
-                      }}
-                    />
-                  ) : (
-                    <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center text-red-600 text-5xl font-bold shadow-2xl border-4 border-white">
-                      {channel.channel_title.charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Channel Title - Centered */}
-                <h3 className="text-lg font-bold text-white text-center truncate mb-3" title={channel.channel_title}>
-                  {channel.channel_title}
-                </h3>
-
-                {/* Badges - Centered */}
-                <div className="flex items-center justify-center gap-2 flex-wrap">
-                  <span className={`px-2 py-1 text-xs font-bold rounded-full border bg-white ${getTierColor(channel.tier)}`}>
-                    {channel.tier.toUpperCase()}
-                  </span>
-                  <span className={`px-2 py-1 text-xs font-medium rounded-full border bg-white ${getActionStatusColor(channel.action_status)}`}>
-                    {getActionStatusLabel(channel.action_status)}
-                  </span>
-                </div>
-
-                {/* Priority Badge - Top Right */}
-                <div className="absolute top-3 right-3">
-                  {getPriorityBadge(channel)}
-                </div>
-              </div>
-
-              {/* Main Metrics - Compact List Format */}
-              <div className="p-5">
-                <div className="space-y-2 text-sm">
-                  {/* Risk Score */}
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 font-medium">Risk Score</span>
-                    <span className="text-xl font-bold text-gray-900">{channel.risk_score}/100</span>
-                  </div>
-
-                  {/* Infringements with Rate */}
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 font-medium">Infringements</span>
-                    <div className="text-right">
-                      <span className="text-xl font-bold text-red-600">{channel.confirmed_infringements}</span>
-                      <span className={`ml-2 text-sm font-medium ${
-                        infringementRate > 50 ? 'text-red-600' :
-                        infringementRate > 25 ? 'text-orange-600' :
-                        infringementRate > 0 ? 'text-yellow-600' :
-                        'text-green-600'
-                      }`}>
-                        {infringementRate.toFixed(1)}% rate
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Cleared */}
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 font-medium">Cleared</span>
-                    <span className="text-lg font-bold text-green-600">{channel.videos_cleared}</span>
-                  </div>
-
-                  {/* Total Found */}
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 font-medium">Total Found</span>
-                    <span className="text-lg font-bold text-gray-900">{channel.total_videos_found}</span>
-                  </div>
-
-                  {/* Unscanned */}
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-600 font-medium">Unscanned</span>
-                    <span className="text-lg font-bold text-orange-600">
-                      {channel.total_videos_found - videosScanned}
-                    </span>
-                  </div>
-
-                  {/* Optional: Subscribers & Total Views (collapsed) */}
-                  <div className="pt-3 mt-3 border-t border-gray-200 text-xs text-gray-500 space-y-1">
-                    <div className="flex justify-between">
-                      <span>Subscribers:</span>
-                      <span className="font-medium">
-                        {channel.subscriber_count ? channel.subscriber_count.toLocaleString() : 'N/A'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Total Views:</span>
-                      <span className="font-medium">
-                        {channel.total_views ? channel.total_views.toLocaleString() : '0'}
-                      </span>
-                    </div>
-                    {channel.assigned_to && (
-                      <div className="flex justify-between">
-                        <span>Assigned:</span>
-                        <span className="font-medium truncate ml-2" title={channel.assigned_to}>{channel.assigned_to}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="mt-4 pt-3 border-t border-gray-200 flex gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleScanAllVideos(channel)
-                    }}
-                    className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={activeScans.has(channel.channel_id) || !canStartScans}
-                    title={!canStartScans ? `${user?.role} role cannot start scans` : "Queue all unscanned videos for Gemini vision analysis (skips already analyzed videos)"}
-                  >
-                    📹 Scan All Videos
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDeepScan(channel)
-                    }}
-                    className="flex-1 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={activeScans.has(channel.channel_id) || !canStartScans}
-                    title={!canStartScans ? `${user?.role} role cannot trigger discovery` : `Fetch the latest 50 videos from this YouTube channel${channel.video_count && channel.video_count >= 50 ? ' (channel has 50+ videos)' : ''}`}
-                  >
-                    🔍 Discover
-                  </button>
-                </div>
-
-              </div>
-            </div>
-          )
-        })}
+        {channels.map((channel) => (
+          <ChannelCard
+            key={channel.channel_id}
+            channel={channel}
+            isScanning={activeScans.has(channel.channel_id)}
+            canStartScans={canStartScans}
+            userRole={user?.role || 'read'}
+            onSelect={(ch) => {
+              setSelectedChannel(ch)
+              setShowDetailsModal(true)
+            }}
+            onScanAllVideos={handleScanAllVideos}
+            onDeepScan={handleDeepScan}
+          />
+        ))}
       </div>
 
       {/* Pagination */}

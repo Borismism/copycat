@@ -14,6 +14,7 @@ class VideoStatus(str, Enum):
     """Video processing status."""
 
     DISCOVERED = "discovered"
+    SCAN_READY = "scan_ready"
     PROCESSING = "processing"
     ANALYZED = "analyzed"
     FAILED = "failed"

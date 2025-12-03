@@ -165,7 +165,25 @@ class GeminiClient:
         """
         try:
             # Use Part.from_uri for YouTube video (official SDK pattern)
-            from google.genai.types import Part
+            from google.genai.types import Part, VideoMetadata, MediaResolution
+
+            # Build video part with FPS and offset settings
+            # CRITICAL: Without video_metadata, Gemini uses 1 FPS at default resolution
+            # which causes ~1M tokens per video instead of ~30K tokens
+            video_part = Part.from_uri(
+                file_uri=youtube_url,
+                mime_type="video/mp4",
+            )
+            video_part.video_metadata = VideoMetadata(
+                fps=fps,
+                start_offset=f"{start_offset}s",
+                end_offset=f"{end_offset}s",
+            )
+
+            logger.info(
+                f"Video part configured: fps={fps}, "
+                f"start={start_offset}s, end={end_offset}s, resolution=LOW"
+            )
 
             # Build request with simplified content structure
             # Using native async client for non-blocking API calls
@@ -174,16 +192,14 @@ class GeminiClient:
                     self.client.models.generate_content(
                         model=self.model_name,
                         contents=[
-                            Part.from_uri(
-                                file_uri=youtube_url,
-                                mime_type="video/mp4",  # YouTube videos are mp4
-                            ),
+                            video_part,
                             prompt,  # Text prompt as string
                         ],
                         config={
                             "temperature": settings.gemini_temperature,
                             "max_output_tokens": settings.gemini_max_output_tokens,
                             "response_mime_type": "application/json",  # Force JSON output
+                            "media_resolution": MediaResolution.MEDIA_RESOLUTION_LOW,  # 66 tokens/frame vs 258
                         },
                     ),
                     timeout=3000  # 50 minutes (CloudRun timeout is 1 hour)
