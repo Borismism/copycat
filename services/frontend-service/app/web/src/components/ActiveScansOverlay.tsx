@@ -269,32 +269,33 @@ export default function ActiveScansOverlay({ onViewProgress, onScansChanged, sca
   const [errorVideos, setErrorVideos] = useState<Map<string, { video: VideoMetadata, error: string, timestamp: number }>>(new Map())
   const [isOpen, setIsOpen] = useState(true)
   const [isMinimized, setIsMinimized] = useState(false)
-  const [previousCount, setPreviousCount] = useState(0)
 
   // Poll for processing videos every 5 seconds
   useEffect(() => {
+    let previousCountRef = 0
+
     const loadProcessingVideos = async () => {
       try {
         const data = await videosAPI.listProcessing()
         const videos = data.processing_videos || []
         const newCount = videos.length
 
-        setProcessingVideos(videos)
-
-        // Notify parent when count changes (especially when scans complete)
-        if (newCount !== previousCount) {
+        // Notify parent when count changes
+        if (newCount !== previousCountRef) {
           onScansChanged?.(newCount)
-          setPreviousCount(newCount)
+          previousCountRef = newCount
         }
 
-        // Auto-close and reset when all scans complete and no errors
-        if (videos.length === 0 && errorVideos.size === 0) {
-          setIsOpen(false)
-          setIsMinimized(false)
-        } else if (videos.length > 0 && !isOpen && !isMinimized) {
-          // Auto-open when new scans start
-          setIsOpen(true)
-        }
+        // Update state and handle auto-open/close
+        setProcessingVideos(prev => {
+          if (videos.length === 0) {
+            setIsOpen(false)
+            setIsMinimized(false)
+          } else if (videos.length > 0 && prev.length === 0) {
+            setIsOpen(true)
+          }
+          return videos
+        })
       } catch (err) {
         console.error('Failed to load processing videos:', err)
       }
@@ -303,7 +304,7 @@ export default function ActiveScansOverlay({ onViewProgress, onScansChanged, sca
     loadProcessingVideos()
     const interval = setInterval(loadProcessingVideos, 5000)
     return () => clearInterval(interval)
-  }, [previousCount, onScansChanged, errorVideos.size, isOpen, isMinimized])
+  }, [onScansChanged])
 
   // Don't render if no processing videos and no errors
   if (processingVideos.length === 0 && errorVideos.size === 0) return null

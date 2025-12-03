@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { videosAPI } from '../api/videos'
 import { channelsAPI } from '../api/channels'
@@ -262,16 +262,16 @@ export default function VideoListPage() {
     }
   }
 
-  const handleScanComplete = () => {
+  const handleScanComplete = useCallback(() => {
     // ONLY reload videos - do NOT close modal
     // Modal should stay open until user explicitly closes it
     loadVideos()
-  }
+  }, [])
 
-  const handleViewProgress = (videoId: string) => {
+  const handleViewProgress = useCallback((videoId: string) => {
     // Just set the video ID - modal will read from shared scanProgress state
     setModalVideoId(videoId)
-  }
+  }, [])
 
   const activeFiltersCount = [channelFilter, statusFilter, ipConfigFilter, infringementFilter].filter(Boolean).length
 
