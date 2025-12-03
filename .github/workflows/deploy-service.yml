@@ -110,8 +110,8 @@ jobs:
       - name: Remove orphaned state reference (one-time fix)
         run: |
           cd terraform
-          terraform init -backend-config="../terraform_global_config/backend.tfvars"
-          terraform state rm google_storage_bucket_iam_member.gitlab_deployer_tf_state || true
+          terraform init -backend-config="../terraform_global_config/backend_config.hcl" -reconfigure
+          terraform state rm google_storage_bucket_iam_member.gitlab_deployer_tf_state 2>/dev/null || echo "Resource not in state (already removed)"
 
       - name: Deploy global infrastructure
         run: |
