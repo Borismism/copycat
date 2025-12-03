@@ -22,8 +22,9 @@ def main():
     import os
 
     # Initialize Firestore
+    project_id = os.getenv("GCP_PROJECT_ID")
     database_id = os.getenv("FIRESTORE_DATABASE_ID", "(default)")
-    db = firestore.Client(database=database_id)
+    db = firestore.Client(project=project_id, database=database_id)
 
     print("🔧 Fixing channel statistics...")
     print()
