@@ -191,7 +191,10 @@ class ResultProcessor:
                 video_data = video_doc.to_dict()
                 # Check if video has previous analysis (not just status, since worker sets status to "processing")
                 previous_analysis = video_data.get("analysis", {})
-                was_previously_analyzed = bool(previous_analysis and isinstance(previous_analysis, dict))
+                has_analysis = bool(previous_analysis and isinstance(previous_analysis, dict))
+                # Also check explicit stats_counted flag (prevents double-counting from race conditions)
+                stats_already_counted = video_data.get("stats_counted", False)
+                was_previously_analyzed = has_analysis or stats_already_counted
 
                 # Get previous infringement status if it was analyzed before
                 if was_previously_analyzed:
@@ -241,6 +244,7 @@ class ResultProcessor:
                 "status": "analyzed",
                 "last_analyzed_at": result.analyzed_at,
                 "infringement_status": infringement_status,  # For fast filtering: actionable|tolerated|clean
+                "stats_counted": True,  # Prevents double-counting in channel stats on re-scans
             })
 
             logger.debug(f"Stored multi-IP result in Firestore: {result.video_id}")
