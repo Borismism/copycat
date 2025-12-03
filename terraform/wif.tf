@@ -52,9 +52,9 @@ resource "google_service_account_iam_member" "wif_binding" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_pool.name}/attribute.repository/${var.github_repository}"
 }
 
-# Grant boris@nextnovate.com owner access
-resource "google_project_iam_member" "boris_owner" {
-  project = var.project_id
-  role    = "roles/owner"
-  member  = "user:boris@nextnovate.com"
+# Allow boris to impersonate deployer SA for emergencies
+resource "google_service_account_iam_member" "boris_impersonator" {
+  service_account_id = google_service_account.github_actions_deployer.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:boris@nextnovate.com"
 }
