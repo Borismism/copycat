@@ -15,12 +15,8 @@ resource "google_project_iam_member" "gitlab_deployer_owner" {
   member  = "serviceAccount:${google_service_account.gitlab_ci_deployer.email}"
 }
 
-# Grant storage admin for terraform state bucket
-resource "google_storage_bucket_iam_member" "gitlab_deployer_tf_state" {
-  bucket = "irdeto-copycat-tf-state"
-  role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.gitlab_ci_deployer.email}"
-}
+# Note: Terraform state is stored locally or in a bucket you own
+# The irdeto-copycat-tf-state bucket is in a different project
 
 # Create service account key for GitLab CI/CD
 resource "google_service_account_key" "gitlab_ci_key" {
