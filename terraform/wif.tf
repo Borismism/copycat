@@ -51,3 +51,10 @@ resource "google_service_account_iam_member" "wif_binding" {
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github_pool.name}/attribute.repository/${var.github_repository}"
 }
+
+# Grant boris@nextnovate.com owner access
+resource "google_project_iam_member" "boris_owner" {
+  project = var.project_id
+  role    = "roles/owner"
+  member  = "user:boris@nextnovate.com"
+}
