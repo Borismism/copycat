@@ -107,6 +107,12 @@ jobs:
         with:
           terraform_wrapper: false
 
+      - name: Remove orphaned state reference (one-time fix)
+        run: |
+          cd terraform
+          terraform init -backend-config="../terraform_global_config/backend.tfvars"
+          terraform state rm google_storage_bucket_iam_member.gitlab_deployer_tf_state || true
+
       - name: Deploy global infrastructure
         run: |
           chmod +x deploy.sh
