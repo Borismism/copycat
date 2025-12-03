@@ -59,9 +59,16 @@ resource "google_service_account_iam_member" "boris_impersonator" {
   member             = "user:boris@nextnovate.com"
 }
 
-# Grant boris direct owner access to the project
-resource "google_project_iam_member" "boris_owner" {
+# Grant boris editor access to the project (org policy blocks external owners)
+resource "google_project_iam_member" "boris_editor" {
   project = var.project_id
-  role    = "roles/owner"
+  role    = "roles/editor"
+  member  = "user:boris@nextnovate.com"
+}
+
+# Grant boris Firestore admin for running fix scripts
+resource "google_project_iam_member" "boris_firestore_admin" {
+  project = var.project_id
+  role    = "roles/datastore.owner"
   member  = "user:boris@nextnovate.com"
 }
