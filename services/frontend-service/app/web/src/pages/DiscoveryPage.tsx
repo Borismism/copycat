@@ -317,7 +317,7 @@ export default function DiscoveryPage() {
       <div className="bg-gradient-to-r from-blue-50 to-cyan-50 rounded-lg shadow-md p-6 border-2 border-blue-200">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Discovery Service Dashboard</h2>
+            <h2 className="text-2xl font-bold text-gray-900">Video Discovery Dashboard</h2>
             <p className="text-gray-600">YouTube video discovery and channel tracking</p>
           </div>
           <Link
