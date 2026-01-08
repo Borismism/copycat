@@ -3,6 +3,22 @@
 # Auto-registers on boot using token from Secret Manager
 
 # =============================================================================
+# Security: Remove insecure default firewall rules
+# =============================================================================
+# The default VPC has a default-allow-ssh rule that opens port 22 to 0.0.0.0/0
+# This is a security risk - we delete it and only allow SSH via IAP
+resource "null_resource" "delete_default_ssh_rule" {
+  provisioner "local-exec" {
+    command = "gcloud compute firewall-rules delete default-allow-ssh --quiet --project=${var.project_id} 2>/dev/null || true"
+  }
+
+  triggers = {
+    # Run once per project
+    project_id = var.project_id
+  }
+}
+
+# =============================================================================
 # Secret Manager for GitLab Runner Token
 # =============================================================================
 resource "google_secret_manager_secret" "gitlab_runner_token" {
