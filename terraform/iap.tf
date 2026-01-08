@@ -57,12 +57,8 @@ resource "google_compute_global_address" "frontend_lb_ip" {
 }
 
 # Managed SSL certificate
-resource "random_id" "cert_suffix" {
-  byte_length = 2
-}
-
 resource "google_compute_managed_ssl_certificate" "frontend_ssl_cert" {
-  name = "copycat-frontend-ssl-cert-${random_id.cert_suffix.hex}"
+  name = "copycat-frontend-ssl-cert"
 
   managed {
     domains = [var.frontend_domain]
