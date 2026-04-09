@@ -16,7 +16,7 @@ interface ScanHistory {
   video_title: string
   started_at: { seconds: number } | string | number
   completed_at?: { seconds: number } | string | number
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'deferred'
   result?: {
     success?: boolean
     has_infringement?: boolean
@@ -46,7 +46,7 @@ export default function VisionAnalyzerPage() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [hasMoreHistory, setHasMoreHistory] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'completed' | 'failed'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'completed' | 'failed' | 'deferred'>('all')
   const observerTarget = useRef<HTMLDivElement>(null)
   const limit = 20
 
@@ -63,8 +63,8 @@ export default function VisionAnalyzerPage() {
     { refreshInterval: 15000 }
   )
 
-  // State for processing videos (fetched with scan history)
-  const [processingVideos, setProcessingVideos] = useState<any[]>([])
+  // Queue stats (not displayed separately, just for count)
+  const [queueCount, setQueueCount] = useState(0)
 
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({type, message})
@@ -113,9 +113,9 @@ export default function VisionAnalyzerPage() {
         setHasMoreHistory(false)
       }
 
-      // Update processing videos (only on first page / refresh)
+      // Update queue count (only on first page / refresh)
       if (cursor === null && data.processing_videos) {
-        setProcessingVideos(data.processing_videos)
+        setQueueCount(data.processing_videos.length)
       }
     } catch (err) {
       console.error('Failed to load scan history:', err)
@@ -214,7 +214,7 @@ export default function VisionAnalyzerPage() {
 
       eventSource.addEventListener('processing_videos', (event) => {
         const videos = JSON.parse(event.data)
-        setProcessingVideos(videos)
+        setQueueCount(videos.length)
       })
 
       eventSource.addEventListener('heartbeat', () => {
@@ -322,7 +322,9 @@ export default function VisionAnalyzerPage() {
   const getStatusColor = (status: string) => {
     if (status === 'completed') return 'text-green-600'
     if (status === 'failed') return 'text-red-600'
-    return 'text-blue-600'
+    if (status === 'deferred') return 'text-yellow-600'
+    if (status === 'running') return 'text-blue-600'
+    return 'text-gray-600'
   }
 
   const handleScanClick = async (scan: ScanHistory) => {
@@ -514,7 +516,10 @@ export default function VisionAnalyzerPage() {
           <div>
             <h3 className="text-xl font-bold text-gray-900">Scan History</h3>
             <p className="text-gray-600 text-sm">
-              {scans.filter(s => s.status === 'running').length} running, {scans.filter(s => s.status === 'failed').length} failed, {scans.filter(s => s.status === 'completed').length} completed
+              {scans.filter(s => s.status === 'running').length > 0 && `${scans.filter(s => s.status === 'running').length} running • `}
+              {scans.filter(s => s.status === 'completed').length} completed, {scans.filter(s => s.status === 'failed').length} failed
+              {scans.filter(s => s.status === 'deferred').length > 0 && `, ${scans.filter(s => s.status === 'deferred').length} deferred`}
+              {queueCount > 0 && ` • ${queueCount} in queue`}
             </p>
           </div>
           <div className="flex items-center gap-4">
@@ -530,6 +535,7 @@ export default function VisionAnalyzerPage() {
                 <option value="running">Running</option>
                 <option value="completed">Completed</option>
                 <option value="failed">Failed</option>
+                <option value="deferred">Deferred</option>
               </select>
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -555,75 +561,6 @@ export default function VisionAnalyzerPage() {
           </div>
         ) : (
           <div className="max-h-[600px] overflow-y-auto space-y-3 pr-2">
-            {/* Queued/Processing Videos */}
-            {processingVideos && processingVideos.length > 0 && (
-              <div className="mb-4">
-                <h4 className="text-sm font-bold text-purple-600 mb-2 flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Queue & Processing ({processingVideos.length})
-                </h4>
-                <div className="space-y-2">
-                  {processingVideos.slice(0, 10).map((video: any) => {
-                    const isProcessing = video.status === 'processing';
-                    const borderColor = isProcessing ? 'border-purple-500' : 'border-orange-500';
-                    const bgColor = isProcessing ? 'bg-purple-50' : 'bg-orange-50';
-                    const textColor = isProcessing ? 'text-purple-900' : 'text-orange-900';
-                    const badgeBg = isProcessing ? 'bg-purple-200' : 'bg-orange-200';
-                    const statusColor = isProcessing ? 'text-purple-600' : 'text-orange-600';
-                    const statusText = isProcessing ? 'Analyzing...' : 'Queued';
-
-                    return (
-                      <div
-                        key={video.video_id}
-                        className={`border-2 ${borderColor} ${bgColor} rounded-lg p-4`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center gap-2 flex-1 min-w-0">
-                            <span className="text-sm font-medium">🎬 Video</span>
-                            <a
-                              href={`https://youtube.com/watch?v=${video.video_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={`text-xs px-2 py-1 rounded-full ${badgeBg} ${textColor} hover:opacity-80 truncate font-medium max-w-xs`}
-                              title={video.title}
-                            >
-                              {video.title}
-                            </a>
-                          </div>
-                          <span className={`text-sm font-bold ${statusColor} flex items-center gap-1 flex-shrink-0`}>
-                            {isProcessing && (
-                              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
-                            )}
-                            {statusText}
-                          </span>
-                        </div>
-                        <div className={`text-xs ${isProcessing ? 'text-purple-700' : 'text-orange-700'} flex justify-between items-center`}>
-                          <span>{video.channel_title}</span>
-                          {video.matched_ips && video.matched_ips.length > 0 && (
-                            <span className={`px-2 py-0.5 ${badgeBg} rounded-full`}>
-                              {video.matched_ips[0]}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {processingVideos.length > 5 && (
-                    <div className="text-xs text-gray-500 text-center py-2">
-                      + {processingVideos.length - 5} more videos queued
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-
             {/* All Scans (filtered by status) */}
             {scans.filter(scan => statusFilter === 'all' || scan.status === statusFilter).map((scan) => (
               <div
@@ -656,6 +593,7 @@ export default function VisionAnalyzerPage() {
                     <span className={`text-sm font-medium ${getStatusColor(scan.status)}`}>
                       {scan.status === 'completed' && '✓ Complete'}
                       {scan.status === 'failed' && '✗ Failed'}
+                      {scan.status === 'deferred' && '⏸ Deferred'}
                       {scan.status === 'running' && (
                         <span className="flex items-center gap-1">
                           <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -703,6 +641,12 @@ export default function VisionAnalyzerPage() {
                 {scan.status === 'failed' && scan.error_message && (
                   <div className="text-xs text-red-600 mt-2 bg-red-50 p-2 rounded">
                     Error: {scan.error_message}
+                  </div>
+                )}
+
+                {scan.status === 'deferred' && (
+                  <div className="text-xs text-yellow-700 mt-2 bg-yellow-50 p-2 rounded">
+                    Scan deferred - will retry automatically
                   </div>
                 )}
               </div>

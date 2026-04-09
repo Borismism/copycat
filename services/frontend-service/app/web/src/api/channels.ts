@@ -8,7 +8,7 @@ export interface ChannelListParams {
   sort_by?: string
   sort_desc?: boolean
   limit?: number
-  offset?: number
+  cursor?: string
 }
 
 export const channelsAPI = {

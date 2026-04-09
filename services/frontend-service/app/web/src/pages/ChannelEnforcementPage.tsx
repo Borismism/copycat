@@ -14,7 +14,7 @@ type SortOption = {
 }
 
 const SORT_OPTIONS: SortOption[] = [
-  { label: 'Highest Risk Score', field: 'risk_score', desc: true },
+  { label: 'Highest Risk Score', field: 'channel_risk', desc: true },
   { label: 'Most Infringements', field: 'confirmed_infringements', desc: true },
   { label: 'Most Videos Found', field: 'total_videos_found', desc: true },
   { label: 'Most Recently Scanned', field: 'last_scanned_at', desc: true },
@@ -26,9 +26,10 @@ export default function ChannelEnforcementPage() {
   const { canStartScans, canEditChannelEnforcement } = usePermissions()
   const navigate = useNavigate()
 
-  // Pagination and sorting state
-  const [page, setPage] = useState(0)
-  const [sortBy, setSortBy] = useState('risk_score')
+  // Pagination and sorting state (cursor-based)
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [pageHistory, setPageHistory] = useState<(string | null)[]>([null]) // Track cursors for "Previous"
+  const [sortBy, setSortBy] = useState('channel_risk')
   const [sortDesc, setSortDesc] = useState(true)
 
   // Filters - now passed to server for filtering
@@ -53,7 +54,7 @@ export default function ChannelEnforcementPage() {
   // Channel list with server-side filtering (reloads when filters change)
   const { data: channelsData, isLoading: loading, refetch } = useChannelList({
     limit,
-    offset: page * limit,
+    cursor: cursor || undefined,
     sort_by: sortBy,
     sort_desc: sortDesc,
     ...(statusFilter && { action_status: statusFilter }),
@@ -70,7 +71,8 @@ export default function ChannelEnforcementPage() {
   const handleSortChange = (option: SortOption) => {
     setSortBy(option.field)
     setSortDesc(option.desc)
-    setPage(0)
+    setCursor(null)
+    setPageHistory([null])
   }
 
   const handleUpdateChannel = useCallback((channelId: string, updates: Partial<ChannelProfile>) => {
@@ -234,7 +236,11 @@ export default function ChannelEnforcementPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Action Status</label>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as ActionStatus | '')}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as ActionStatus | '')
+                setCursor(null)
+                setPageHistory([null])
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Statuses</option>
@@ -249,7 +255,11 @@ export default function ChannelEnforcementPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Risk Tier</label>
             <select
               value={tierFilter}
-              onChange={(e) => setTierFilter(e.target.value as ChannelTier | '')}
+              onChange={(e) => {
+                setTierFilter(e.target.value as ChannelTier | '')
+                setCursor(null)
+                setPageHistory([null])
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Tiers</option>
@@ -264,7 +274,11 @@ export default function ChannelEnforcementPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Assigned To</label>
             <select
               value={assigneeFilter}
-              onChange={(e) => setAssigneeFilter(e.target.value)}
+              onChange={(e) => {
+                setAssigneeFilter(e.target.value)
+                setCursor(null)
+                setPageHistory([null])
+              }}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">All Team Members</option>
@@ -298,18 +312,30 @@ export default function ChannelEnforcementPage() {
       {/* Pagination */}
       <div className="flex justify-between items-center">
         <button
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
-          disabled={page === 0}
+          onClick={() => {
+            // Go to previous cursor
+            const newHistory = [...pageHistory]
+            newHistory.pop() // Remove current
+            const prevCursor = newHistory[newHistory.length - 1]
+            setCursor(prevCursor)
+            setPageHistory(newHistory)
+          }}
+          disabled={pageHistory.length <= 1}
           className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Previous
         </button>
         <span className="text-gray-600">
-          Page {page + 1} of {Math.ceil(total / limit)}
+          Page {pageHistory.length} of {Math.ceil(total / limit)}
         </span>
         <button
-          onClick={() => setPage((p) => p + 1)}
-          disabled={(page + 1) * limit >= total}
+          onClick={() => {
+            if (channelsData?.next_cursor) {
+              setPageHistory([...pageHistory, channelsData.next_cursor])
+              setCursor(channelsData.next_cursor)
+            }
+          }}
+          disabled={!channelsData?.has_more}
           className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Next
@@ -375,7 +401,7 @@ export default function ChannelEnforcementPage() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                   <div className="text-sm text-gray-600 mb-1">Risk Score</div>
-                  <div className="text-3xl font-bold text-gray-900">{selectedChannel.risk_score}<span className="text-lg text-gray-500">/100</span></div>
+                  <div className="text-3xl font-bold text-gray-900">{selectedChannel.channel_risk}<span className="text-lg text-gray-500">/100</span></div>
                 </div>
                 <div className="bg-red-50 rounded-lg p-4 border border-red-200">
                   <div className="text-sm text-gray-600 mb-1">Infringements</div>

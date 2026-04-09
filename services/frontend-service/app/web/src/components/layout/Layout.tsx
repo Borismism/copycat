@@ -29,7 +29,7 @@ export default function Layout({ children }: LayoutProps) {
       { path: '/dashboards', label: 'Services' },
       { path: '/config', label: 'IP Configuration' },
       { path: '/videos', label: 'Videos' },
-      { path: '/channels', label: 'Enforcement' }
+      { path: '/channels', label: 'Channels' }
     )
 
     // Add admin-only routes (check actualUser for real admin, not impersonated)

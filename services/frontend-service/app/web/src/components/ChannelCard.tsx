@@ -134,7 +134,7 @@ export const ChannelCard = memo(function ChannelCard({
           {/* Risk Score */}
           <div className="flex justify-between items-center">
             <span className="text-gray-600 font-medium">Risk Score</span>
-            <span className="text-xl font-bold text-gray-900">{channel.risk_score}/100</span>
+            <span className="text-xl font-bold text-gray-900">{channel.channel_risk}/100</span>
           </div>
 
           {/* Infringements with Rate */}

@@ -18,7 +18,7 @@ type SortOption = {
 const SORT_OPTIONS: SortOption[] = [
   { label: '🔥 Highest Risk (Priority)', field: 'scan_priority', desc: true },
   { label: '⚠️ Channel Risk', field: 'channel_risk', desc: true },
-  { label: '📊 Video Risk', field: 'video_risk', desc: true },
+  { label: '📊 Infringement Risk', field: 'infringement_risk', desc: true },
   { label: '👁️ Highest Views', field: 'view_count', desc: true },
   { label: '⏱️ Longest Duration', field: 'duration_seconds', desc: true },
   { label: '🆕 Most Recently Found', field: 'discovered_at', desc: true },
@@ -36,7 +36,7 @@ export default function VideoListPage() {
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
-  const [sortBy, setSortBy] = useState('scan_priority')
+  const [sortBy, setSortBy] = useState('infringement_risk')
   const [sortDesc, setSortDesc] = useState(true)
   const [modalVideoId, setModalVideoId] = useState<string | null>(null)
   const [scanProgress, setScanProgress] = useState<Map<string, any>>(new Map()) // SINGLE SOURCE OF TRUTH for all progress
@@ -73,7 +73,7 @@ export default function VideoListPage() {
         const data = await channelsAPI.list({
           limit,
           offset,
-          sort_by: 'risk_score',
+          sort_by: 'channel_risk',
           sort_desc: true
         })
         allChannels = [...allChannels, ...data.channels]
@@ -431,8 +431,42 @@ export default function VideoListPage() {
                 </div>
               )}
 
-              {/* Risk Score */}
-              {video.scan_priority !== undefined && (
+              {/* Risk Score - show infringement risk for scanned videos, scan priority for unscanned */}
+              {video.status === 'analyzed' ? (
+                <div className={`mt-2 p-2 rounded-lg border ${
+                  video.risk_tier === 'CLEAR' || video.risk_tier === 'SAFE_HARBOR' || video.risk_tier === 'TOLERATED'
+                    ? 'bg-green-50 border-green-200'
+                    : video.risk_tier === 'CRITICAL' || video.risk_tier === 'HIGH'
+                    ? 'bg-red-50 border-red-200'
+                    : 'bg-orange-50 border-orange-200'
+                }`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-semibold text-gray-700">Infringement Risk</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                      video.risk_tier === 'CLEAR' || video.risk_tier === 'SAFE_HARBOR' || video.risk_tier === 'TOLERATED' ? 'bg-green-600 text-white' :
+                      video.risk_tier === 'CRITICAL' ? 'bg-red-700 text-white' :
+                      video.risk_tier === 'HIGH' ? 'bg-red-600 text-white' :
+                      video.risk_tier === 'MEDIUM' ? 'bg-orange-600 text-white' :
+                      'bg-yellow-600 text-white'
+                    }`}>
+                      {video.infringement_risk ?? 0}/100
+                    </span>
+                  </div>
+                  <div className="text-xs flex items-center justify-between">
+                    <span className={`font-medium ${
+                      video.risk_tier === 'CLEAR' || video.risk_tier === 'SAFE_HARBOR' || video.risk_tier === 'TOLERATED' ? 'text-green-700' :
+                      video.risk_tier === 'CRITICAL' || video.risk_tier === 'HIGH' ? 'text-red-700' :
+                      'text-orange-700'
+                    }`}>
+                      {video.risk_tier === 'CLEAR' ? '✓ Clear' :
+                       video.risk_tier === 'SAFE_HARBOR' ? '✓ Safe Harbor' :
+                       video.risk_tier === 'TOLERATED' ? '✓ Tolerated' :
+                       `⚠ ${video.risk_tier}`}
+                    </span>
+                    <span className="text-gray-500">CH: {video.channel_risk ?? '-'}</span>
+                  </div>
+                </div>
+              ) : video.scan_priority !== undefined && (
                 <div className="mt-2 p-2 bg-gray-50 rounded-lg border border-gray-200">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-semibold text-gray-700">Scan Priority</span>
@@ -447,8 +481,8 @@ export default function VideoListPage() {
                     </span>
                   </div>
                   <div className="text-xs text-gray-600 flex items-center justify-between">
-                    <span>Tier: <span className="font-medium">{video.priority_tier}</span></span>
-                    <span className="text-gray-500">CH:{video.channel_risk} | VID:{video.video_risk}</span>
+                    <span>Priority: <span className="font-medium">{video.priority_tier}</span></span>
+                    <span className="text-gray-500">CH: {video.channel_risk ?? '-'}</span>
                   </div>
                 </div>
               )}

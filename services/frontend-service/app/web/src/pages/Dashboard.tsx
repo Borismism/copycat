@@ -24,8 +24,8 @@ export default function Dashboard() {
   const isSameMonth = selectedDate.getMonth() === now.getMonth() &&
                       selectedDate.getFullYear() === now.getFullYear()
 
-  // For monthly view, format as first day of month
-  const monthStartParam = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1).toISOString().split('T')[0]
+  // For monthly view, format as first day of month (use local date to avoid timezone issues)
+  const monthStartParam = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-01`
 
   // Fetch services with SWR (auto-refresh every 30 seconds)
   const { data: services, error: servicesError } = useSWR(

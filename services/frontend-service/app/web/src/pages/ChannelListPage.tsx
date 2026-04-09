@@ -9,7 +9,7 @@ type SortOption = {
 }
 
 const SORT_OPTIONS: SortOption[] = [
-  { label: 'Highest Risk Score', field: 'risk_score', desc: true },
+  { label: 'Highest Risk Score', field: 'channel_risk', desc: true },
   { label: 'Most Videos Found', field: 'total_videos_found', desc: true },
   { label: 'Most Recently Scanned', field: 'last_scanned_at', desc: true },
   { label: 'Most Recently Discovered', field: 'discovered_at', desc: true },
@@ -21,7 +21,7 @@ export default function ChannelListPage() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
-  const [sortBy, setSortBy] = useState('risk_score')
+  const [sortBy, setSortBy] = useState('channel_risk')
   const [sortDesc, setSortDesc] = useState(true)
   const limit = 20
 
@@ -178,7 +178,7 @@ export default function ChannelListPage() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3">
                         <div>
                           <span className="text-gray-600">Risk Score:</span>
-                          <span className="ml-2 font-semibold text-gray-900">{channel.risk_score}</span>
+                          <span className="ml-2 font-semibold text-gray-900">{channel.channel_risk}</span>
                         </div>
                         <div>
                           <span className="text-gray-600">Videos:</span>

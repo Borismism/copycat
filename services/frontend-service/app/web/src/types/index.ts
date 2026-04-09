@@ -76,10 +76,11 @@ export interface VideoMetadata {
   last_analyzed_at?: string
 
   // Risk scoring fields
-  scan_priority?: number  // Final scan priority (0-100)
-  priority_tier?: string  // CRITICAL, HIGH, MEDIUM, LOW, VERY_LOW
-  channel_risk?: number   // Channel risk component (0-100)
-  video_risk?: number     // Video risk component (0-100)
+  scan_priority?: number  // Pre-scan priority (0-100)
+  priority_tier?: string  // SCAN_NOW, SCAN_SOON, SCAN_LATER, SKIP
+  channel_risk?: number   // Channel risk (0-100)
+  infringement_risk?: number  // Post-scan infringement risk (0-100), 0 if clear
+  risk_tier?: string      // CRITICAL, HIGH, MEDIUM, LOW, MINIMAL, CLEAR, PENDING
 }
 
 export interface VideoListResponse {
@@ -97,11 +98,13 @@ export interface ChannelProfile {
   channel_id: string
   channel_title: string
   total_videos_found: number
+  total_videos_analyzed: number
   confirmed_infringements: number
   videos_cleared: number
   last_infringement_date?: string
   infringement_rate: number
-  risk_score: number
+  channel_risk: number  // 0-100, calculated by channel_risk_calculator
+  risk_score?: number   // Legacy field, may not exist
   tier: ChannelTier
   is_newly_discovered: boolean
   last_scanned_at?: string
