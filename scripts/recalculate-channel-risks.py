@@ -1,127 +1,187 @@
 #!/usr/bin/env python3
 """
-Recalculate risk scores for all channels based on current analysis data.
+Recalculate risks for channels using NEW risk model.
 
-This script:
-1. Gets all channels from Firestore
-2. For each channel, counts analyzed videos (infringements vs cleared)
-3. Recalculates channel_risk using the ChannelRiskCalculator
-4. Updates the channel document in Firestore
+Only immediate_takedown = real infringement with risk score.
+Everything else (tolerated, safe_harbor, monitor, ignore) = no risk.
 
 Usage:
-    FIRESTORE_EMULATOR_HOST=localhost:8200 GCP_PROJECT_ID=copycat-local \
-    uv run python3 scripts/recalculate-channel-risks.py
-
-    # Or for production:
-    GCP_PROJECT_ID=irdeto-copycat-internal-dev \
-    uv run python3 scripts/recalculate-channel-risks.py
+    GCP_PROJECT_ID=copycat-429012 FIRESTORE_DATABASE=copycat uv run python3 scripts/recalculate-channel-risks.py <channel_id>
 """
 
 import os
 import sys
-from datetime import datetime, timezone
-
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'services', 'risk-analyzer-service'))
-
 from google.cloud import firestore
-from app.core.channel_risk_calculator import ChannelRiskCalculator
+
+
+def get_db():
+    project = os.environ.get("GCP_PROJECT_ID", "copycat-local")
+    database = os.environ.get("FIRESTORE_DATABASE", "(default)")
+    if os.environ.get("FIRESTORE_EMULATOR_HOST"):
+        return firestore.Client(project=project)
+    return firestore.Client(project=project, database=database)
+
+
+def get_recommendation(v):
+    """Get recommendation from video. Only immediate_takedown = infringement."""
+    analysis = v.get("analysis") or {}
+    rec = analysis.get("overall_recommendation", "")
+    
+    # Also check status field
+    if v.get("status") == "infringement":
+        return "immediate_takedown"
+    
+    # Also check infringement_status field
+    inf_status = v.get("infringement_status", "")
+    if inf_status == "immediate_takedown":
+        return "immediate_takedown"
+    
+    return rec or "unknown"
+
+
+def is_scanned(v):
+    return v.get("status") in ["analyzed", "scanned", "infringement", "clean", "completed", "failed"]
+
+
+def calc_infringement_risk(video, channel):
+    """Calculate risk for real infringement."""
+    f = {}
+    
+    views = video.get("view_count", 0)
+    f["views"] = 25 if views >= 10_000_000 else 22 if views >= 1_000_000 else 18 if views >= 100_000 else 12 if views >= 10_000 else 6 if views >= 1_000 else 2
+    
+    vel = video.get("view_velocity", 0)
+    f["velocity"] = 25 if vel >= 10_000 else 20 if vel >= 1_000 else 12 if vel >= 100 else 5 if vel >= 10 else 0
+    
+    subs = channel.get("subscriber_count", 0)
+    f["reach"] = 20 if subs >= 1_000_000 else 16 if subs >= 500_000 else 12 if subs >= 100_000 else 8 if subs >= 10_000 else 4 if subs >= 1_000 else 1
+    
+    analysis = video.get("analysis") or {}
+    likelihood = analysis.get("max_likelihood", 50)
+    f["severity"] = 15 if likelihood >= 80 else 10 if likelihood >= 50 else 5
+    
+    dur = video.get("duration_seconds", 0)
+    f["duration"] = 10 if dur >= 600 else 8 if dur >= 300 else 5 if dur >= 120 else 3 if dur >= 60 else 1
+    
+    f["engagement"] = 0
+    if views > 0:
+        eng = (video.get("like_count", 0) + video.get("comment_count", 0)) / views
+        f["engagement"] = 5 if eng > 0.05 else 3 if eng > 0.02 else 0
+    
+    total = min(100, max(0, sum(f.values())))
+    tier = "CRITICAL" if total >= 80 else "HIGH" if total >= 60 else "MEDIUM" if total >= 40 else "LOW" if total >= 20 else "MINIMAL"
+    
+    return {"infringement_risk": total, "risk_tier": tier, "risk_factors": f}
+
+
+def calc_channel_risk(infringements, scanned, subs):
+    """Calculate channel risk based on real infringements only."""
+    if scanned == 0:
+        return {"channel_risk": 0, "factors": {"rate": 0, "volume": 0, "reach": 0}}
+    
+    rate = infringements / scanned
+    
+    # Rate (0-50)
+    if rate <= 0: r = 0
+    elif rate <= 0.10: r = int(rate * 120)
+    elif rate <= 0.25: r = 12 + int((rate - 0.10) * 87)
+    elif rate <= 0.50: r = 25 + int((rate - 0.25) * 52)
+    elif rate <= 0.75: r = 38 + int((rate - 0.50) * 28)
+    else: r = 45 + int((rate - 0.75) * 20)
+    r = min(50, r)
+    
+    # Volume (0-30)
+    v = 0 if infringements == 0 else 4 if infringements == 1 else 8 if infringements <= 3 else 12 if infringements <= 5 else 18 if infringements <= 10 else 24 if infringements <= 20 else 30
+    
+    # Reach (0-20) only if infringements exist
+    if infringements == 0: rch = 0
+    else: rch = 20 if subs >= 1_000_000 else 16 if subs >= 500_000 else 12 if subs >= 100_000 else 9 if subs >= 50_000 else 6 if subs >= 10_000 else 3 if subs >= 1_000 else 0
+    
+    return {"channel_risk": min(100, r + v + rch), "factors": {"rate": r, "volume": v, "reach": rch}}
 
 
 def main():
-    """Recalculate risk scores for all channels."""
-    # Get project from environment
-    project_id = os.environ.get('GCP_PROJECT_ID')
-    if not project_id:
-        print("ERROR: GCP_PROJECT_ID environment variable not set")
+    if len(sys.argv) < 2:
+        print("Usage: python3 scripts/recalculate-channel-risks.py <channel_id> ...")
         sys.exit(1)
 
-    database_id = os.environ.get('FIRESTORE_DATABASE_ID', 'copycat')
+    db = get_db()
 
-    print(f"Connecting to Firestore: {project_id} / {database_id}")
-    db = firestore.Client(project=project_id, database=database_id)
+    for channel_id in sys.argv[1:]:
+        print(f"\n{'='*60}\nCHANNEL: {channel_id}\n{'='*60}")
 
-    # Initialize risk calculator
-    risk_calculator = ChannelRiskCalculator()
+        ch_ref = db.collection("channels").document(channel_id)
+        ch_doc = ch_ref.get()
+        if not ch_doc.exists:
+            print("NOT FOUND"); continue
 
-    # Get all channels
-    channels_ref = db.collection('channels')
-    channels = list(channels_ref.stream())
+        ch = ch_doc.to_dict()
+        subs = ch.get("subscriber_count", 0)
+        print(f"Name: {ch.get('channel_name', ch.get('channel_title', '?'))}")
+        print(f"Subs: {subs:,}")
 
-    print(f"\nFound {len(channels)} channels")
-    print("=" * 80)
+        videos = list(db.collection("videos").where("channel_id", "==", channel_id).stream())
+        print(f"Videos: {len(videos)}\n")
 
-    updated_count = 0
-    error_count = 0
+        scanned = 0
+        infringements = 0
+        by_status = {}
 
-    for channel_doc in channels:
-        channel_data = channel_doc.to_dict()
-        channel_id = channel_data.get('channel_id', channel_doc.id)
-        channel_title = channel_data.get('channel_title', 'Unknown')
+        for vdoc in videos:
+            v = vdoc.to_dict()
+            vid = v.get("video_id", vdoc.id)
 
-        try:
-            # Get all analyzed videos for this channel
-            videos_ref = db.collection('videos').where('channel_id', '==', channel_id)
-            videos = list(videos_ref.stream())
+            if not is_scanned(v):
+                db.collection("videos").document(vdoc.id).update({"risk_tier": "PENDING"})
+                by_status["pending"] = by_status.get("pending", 0) + 1
+                continue
 
-            # Count infringements and cleared
-            confirmed_infringements = 0
-            videos_cleared = 0
-            total_videos_analyzed = 0
+            scanned += 1
+            rec = get_recommendation(v)
+            by_status[rec] = by_status.get(rec, 0) + 1
 
-            for video_doc in videos:
-                video_data = video_doc.to_dict()
-                status = video_data.get('status')
+            if rec == "immediate_takedown":
+                # Real infringement - calculate risk
+                infringements += 1
+                res = calc_infringement_risk(v, ch)
+                db.collection("videos").document(vdoc.id).update({
+                    "infringement_risk": res["infringement_risk"],
+                    "risk_tier": res["risk_tier"],
+                    "risk_factors": res["risk_factors"]
+                })
+                print(f"  {vid}: TAKEDOWN risk={res['infringement_risk']} tier={res['risk_tier']}")
+            else:
+                # Everything else = no risk
+                tier = rec.upper() if rec in ["tolerated", "safe_harbor", "monitor"] else "CLEAR"
+                db.collection("videos").document(vdoc.id).update({
+                    "infringement_risk": 0,
+                    "risk_tier": tier,
+                    "risk_factors": {}
+                })
 
-                if status == 'analyzed':
-                    total_videos_analyzed += 1
-                    analysis = video_data.get('analysis')
-                    if analysis and isinstance(analysis, dict):
-                        contains_infringement = analysis.get('contains_infringement', False)
-                        if contains_infringement:
-                            confirmed_infringements += 1
-                        else:
-                            videos_cleared += 1
+        # Channel risk
+        ch_res = calc_channel_risk(infringements, scanned, subs)
+        old = ch.get("channel_risk", 0)
+        new = ch_res["channel_risk"]
 
-            # Update channel data with counts
-            channel_data['total_videos_analyzed'] = total_videos_analyzed
-            channel_data['confirmed_infringements'] = confirmed_infringements
-            channel_data['videos_cleared'] = videos_cleared
-            channel_data['total_videos_found'] = len(videos)
+        ch_ref.update({
+            "channel_risk": new,
+            "channel_risk_factors": ch_res["factors"],
+            "confirmed_infringements": infringements,
+            "total_videos_analyzed": scanned
+        })
 
-            # Calculate new risk
-            old_risk = channel_data.get('channel_risk', 0)
-            risk_result = risk_calculator.calculate_channel_risk(channel_data)
-            new_risk = risk_result['channel_risk']
+        # Update channel_risk on videos
+        for vdoc in videos:
+            db.collection("videos").document(vdoc.id).update({"channel_risk": new})
 
-            # Update channel in Firestore
-            channels_ref.document(channel_id).update({
-                'channel_risk': new_risk,
-                'channel_risk_factors': risk_result['factors'],
-                'total_videos_analyzed': total_videos_analyzed,
-                'confirmed_infringements': confirmed_infringements,
-                'videos_cleared': videos_cleared,
-                'total_videos_found': len(videos),
-                'updated_at': datetime.now(timezone.utc),
-            })
-
-            print(f"✓ {channel_title[:50]:50} | Risk: {old_risk:3d}→{new_risk:3d} | "
-                  f"Analyzed: {total_videos_analyzed:3d} | "
-                  f"Infringements: {confirmed_infringements:3d} | "
-                  f"Cleared: {videos_cleared:3d}")
-
-            updated_count += 1
-
-        except Exception as e:
-            print(f"✗ {channel_title[:50]:50} | ERROR: {e}")
-            error_count += 1
-
-    print("=" * 80)
-    print(f"\nSummary:")
-    print(f"  Channels updated: {updated_count}")
-    print(f"  Errors: {error_count}")
-    print(f"\nDone! ✨")
+        print(f"\nBY STATUS: {by_status}")
+        print(f"\nSUMMARY:")
+        print(f"  Scanned: {scanned}")
+        print(f"  Infringements (takedown): {infringements}")
+        print(f"  Channel risk: {old} -> {new}")
+        print(f"  Factors: {ch_res['factors']}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
