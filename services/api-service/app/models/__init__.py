@@ -74,10 +74,11 @@ class VideoMetadata(BaseModel):
     contains_infringement: bool | None = None
     confidence: float | None = None
     # Risk scoring fields (from risk-analyzer-service)
-    scan_priority: int | None = None  # 0-100 adaptive priority score
-    priority_tier: str | None = None  # CRITICAL, HIGH, MEDIUM, LOW, VERY_LOW
+    scan_priority: int | None = None  # 0-100 pre-scan priority score
+    priority_tier: str | None = None  # SCAN_NOW, SCAN_SOON, SCAN_LATER, SKIP
     channel_risk: int | None = None  # 0-100 channel risk score
-    video_risk: int | None = None  # 0-100 video-level risk score
+    infringement_risk: int | None = None  # 0-100 post-scan infringement risk (0 if clear)
+    risk_tier: str | None = None  # CRITICAL, HIGH, MEDIUM, LOW, MINIMAL, CLEAR, PENDING
 
 
 class VideoListResponse(BaseModel):
@@ -105,7 +106,8 @@ class ChannelProfile(BaseModel):
     videos_cleared: int = 0  # Videos confirmed as NOT infringing
     last_infringement_date: datetime | None = None
     infringement_rate: float = 0.0
-    risk_score: int = 0  # 0-100
+    risk_score: int = 0  # 0-100 (legacy name, maps to channel_risk in Firestore)
+    channel_risk: int = 0  # 0-100, alias for risk_score for frontend compatibility
     tier: ChannelTier = ChannelTier.MINIMAL
     is_newly_discovered: bool = True
     last_scanned_at: datetime | None = None
@@ -125,7 +127,13 @@ class ChannelProfile(BaseModel):
 
     @model_validator(mode="after")
     def compute_tier_and_rate(self) -> "ChannelProfile":
-        """Compute tier from risk_score and infringement_rate."""
+        """Compute tier from risk_score and sync channel_risk alias."""
+        # Sync channel_risk with risk_score (both should have same value)
+        if self.channel_risk == 0 and self.risk_score > 0:
+            self.channel_risk = self.risk_score
+        elif self.risk_score == 0 and self.channel_risk > 0:
+            self.risk_score = self.channel_risk
+
         # Compute tier from risk_score
         if self.risk_score >= 80:
             self.tier = ChannelTier.CRITICAL

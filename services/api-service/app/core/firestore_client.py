@@ -217,7 +217,8 @@ class FirestoreClient:
 
         # Map API sort fields to Firestore fields
         firestore_sort_fields = {
-            "risk_score": "channel_risk",
+            "channel_risk": "channel_risk",
+            "risk_score": "channel_risk",  # Legacy alias
             "total_videos_found": "total_videos_found",
             "confirmed_infringements": "confirmed_infringements",
             "last_scanned_at": "last_scanned_at",
@@ -266,6 +267,7 @@ class FirestoreClient:
                 "last_infringement_date": data.get("last_infringement_date"),
                 "infringement_rate": data.get("infringement_rate", 0.0),
                 "risk_score": data.get("channel_risk", 0),
+                "channel_risk": data.get("channel_risk", 0),
                 "tier": data.get("tier", "minimal").lower(),  # Enum expects lowercase!
                 "is_newly_discovered": data.get("is_newly_discovered", True),
                 "last_scanned_at": data.get("last_scanned_at"),
@@ -419,6 +421,8 @@ class FirestoreClient:
         last_run = await self.get_last_discovery_run()
 
         # Count videos analyzed (use system_stats for fast O(1) lookup)
+        # NOTE: This is ALL-TIME total, not 24h. Frontend divides by 24h which is wrong.
+        # TODO: Add daily_stats aggregation to fix throughput calculation
         videos_analyzed = 0
         infringements_found = 0
 
