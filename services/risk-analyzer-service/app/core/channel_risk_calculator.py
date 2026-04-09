@@ -1,16 +1,17 @@
 """
-Channel Risk Calculator V3 - Business Impact Focus
+Channel Risk Calculator - Infringement-Based Scoring
 
-Calculates channel risk based on actual damage to IP holder.
-Formula: Risk = Infringement Pattern × Channel Reach × Damage
+Channel risk = infringement percentage + absolute count + reach (only if infringing)
+
+KEY INSIGHT: Reach only matters IF the channel has infringements.
+- Big channel, 0 infringements = LOW risk
+- Small channel, 50% infringement = MEDIUM risk
+- Big channel, 50% infringement = HIGH risk (reach amplifies)
 
 Scoring (0-100):
-1. Infringement Rate (0-40 pts) - Pattern severity
-2. Absolute Volume (0-30 pts) - Scale of problem
-3. Channel Reach (0-20 pts) - Subscriber count
-4. Damage Done (0-10 pts) - Views on infringing content
-
-Priority: Big channels with many infringements = Maximum risk
+1. Infringement Rate (0-50 pts) - What % of their videos infringe
+2. Absolute Volume (0-30 pts) - How many total infringements
+3. Channel Reach (0-20 pts) - ONLY if infringement rate > 0
 """
 
 import logging
@@ -19,11 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 class ChannelRiskCalculator:
-    """Calculate channel risk score based on business impact."""
+    """Calculate channel risk based on infringement history."""
 
     def calculate_channel_risk(self, channel: dict) -> dict:
         """
-        Calculate risk score focused on protecting IP holder.
+        Calculate channel risk score.
+
+        Formula:
+        - Base: Infringement rate (0-50) + absolute count (0-30)
+        - Multiplier: Reach (0-20) ONLY applies if infringement_rate > 0
 
         Args:
             channel: Channel document from Firestore
@@ -31,118 +36,124 @@ class ChannelRiskCalculator:
         Returns:
             {
                 "channel_risk": int (0-100),
-                "factors": {
-                    "infringement_rate": float,
-                    "infringement_volume": int,
-                    "channel_reach": int,
-                    "damage_done": int
-                }
+                "factors": dict,
+                "stats": dict
             }
         """
         channel_id = channel.get("channel_id", "unknown")
 
-        # Get data
-        confirmed_infringements = channel.get("confirmed_infringements", 0)
-        # Use total_videos_analyzed (set by channel_updater) as fallback to total_videos_found
-        total_videos_scanned = channel.get("total_videos_analyzed", channel.get("total_videos_found", 0))
+        # Get infringement data
+        confirmed = channel.get("confirmed_infringements", 0)
+        total_scanned = channel.get("total_videos_analyzed", channel.get("total_videos_found", 0))
         subscriber_count = channel.get("subscriber_count", 0)
-        total_views = channel.get("total_views", 0)  # Sum of view_count on all discovered videos
 
-        if total_videos_scanned == 0:
+        # No data yet = unknown, low risk
+        if total_scanned == 0:
+            logger.info(f"Channel {channel_id}: risk=0 (no videos scanned yet)")
             return {
                 "channel_risk": 0,
-                "factors": {
-                    "infringement_rate": 0,
-                    "infringement_volume": 0,
-                    "channel_reach": 0,
-                    "damage_done": 0
-                }
+                "factors": {"infringement_rate": 0, "infringement_volume": 0, "reach": 0},
+                "stats": {"confirmed_infringements": 0, "total_videos_scanned": 0, "rate_percentage": 0.0}
             }
 
-        infringement_rate = confirmed_infringements / total_videos_scanned
+        # Calculate infringement rate
+        rate = confirmed / total_scanned
+        rate_pct = rate * 100
 
-        # 1. INFRINGEMENT RATE (0-40 points)
-        if infringement_rate <= 0.10:
-            rate_points = infringement_rate * 150  # 0-15 points
-        elif infringement_rate <= 0.25:
-            rate_points = 15 + (infringement_rate - 0.10) * 66.67  # 15-25 points
-        elif infringement_rate <= 0.50:
-            rate_points = 25 + (infringement_rate - 0.25) * 40  # 25-35 points
-        elif infringement_rate <= 0.75:
-            rate_points = 35 + (infringement_rate - 0.50) * 16  # 35-39 points
+        # 1. INFRINGEMENT RATE (0-50 points)
+        if rate <= 0:
+            rate_points = 0
+        elif rate <= 0.10:
+            # 0-10% → 0-12 points
+            rate_points = int(rate * 120)
+        elif rate <= 0.25:
+            # 10-25% → 12-25 points
+            rate_points = 12 + int((rate - 0.10) * 87)
+        elif rate <= 0.50:
+            # 25-50% → 25-38 points
+            rate_points = 25 + int((rate - 0.25) * 52)
+        elif rate <= 0.75:
+            # 50-75% → 38-45 points
+            rate_points = 38 + int((rate - 0.50) * 28)
         else:
-            rate_points = 39 + (infringement_rate - 0.75) * 4  # 39-40 points
+            # 75-100% → 45-50 points
+            rate_points = 45 + int((rate - 0.75) * 20)
 
-        rate_points = min(40, round(rate_points))
+        rate_points = min(50, rate_points)
 
         # 2. ABSOLUTE VOLUME (0-30 points)
-        if confirmed_infringements <= 2:
-            volume_points = 6
-        elif confirmed_infringements <= 5:
-            volume_points = 12
-        elif confirmed_infringements <= 10:
-            volume_points = 18
-        elif confirmed_infringements <= 20:
-            volume_points = 23
-        elif confirmed_infringements <= 40:
-            volume_points = 27
+        if confirmed == 0:
+            volume_points = 0
+        elif confirmed == 1:
+            volume_points = 4   # First offense
+        elif confirmed <= 3:
+            volume_points = 8   # 2-3 infringements
+        elif confirmed <= 5:
+            volume_points = 12  # 4-5 infringements
+        elif confirmed <= 10:
+            volume_points = 18  # 6-10 infringements
+        elif confirmed <= 20:
+            volume_points = 24  # 11-20 infringements
         else:
-            volume_points = 30
+            volume_points = 30  # 20+ infringements (serial infringer)
 
-        # 3. CHANNEL REACH (0-20 points) - Subscriber count
-        if subscriber_count >= 1_000_000:
-            reach_points = 20  # Massive channel
-        elif subscriber_count >= 500_000:
-            reach_points = 17  # Very large
-        elif subscriber_count >= 100_000:
-            reach_points = 14  # Large
-        elif subscriber_count >= 50_000:
-            reach_points = 11  # Medium-large
-        elif subscriber_count >= 10_000:
-            reach_points = 8   # Medium
-        elif subscriber_count >= 1_000:
-            reach_points = 4   # Small
+        # 3. CHANNEL REACH (0-20 points) - ONLY if there are infringements
+        if confirmed == 0:
+            reach_points = 0  # No infringements = reach doesn't matter
         else:
-            reach_points = 0   # Tiny/unknown
+            # Reach amplifies risk for channels WITH infringements
+            if subscriber_count >= 1_000_000:
+                reach_points = 20  # 1M+ subs
+            elif subscriber_count >= 500_000:
+                reach_points = 16  # 500k+
+            elif subscriber_count >= 100_000:
+                reach_points = 12  # 100k+
+            elif subscriber_count >= 50_000:
+                reach_points = 9   # 50k+
+            elif subscriber_count >= 10_000:
+                reach_points = 6   # 10k+
+            elif subscriber_count >= 1_000:
+                reach_points = 3   # 1k+
+            else:
+                reach_points = 0   # Small channel
 
-        # 4. DAMAGE DONE (0-10 points) - Views on infringing content
-        # Use rough estimate: total_views * infringement_rate
-        estimated_infringing_views = int(total_views * infringement_rate)
-
-        if estimated_infringing_views >= 10_000_000:
-            damage_points = 10  # 10M+ views
-        elif estimated_infringing_views >= 5_000_000:
-            damage_points = 9   # 5M+ views
-        elif estimated_infringing_views >= 1_000_000:
-            damage_points = 8   # 1M+ views
-        elif estimated_infringing_views >= 500_000:
-            damage_points = 6   # 500K+ views
-        elif estimated_infringing_views >= 100_000:
-            damage_points = 4   # 100K+ views
-        elif estimated_infringing_views >= 10_000:
-            damage_points = 2   # 10K+ views
-        else:
-            damage_points = 0   # Minimal views
-
-        # TOTAL SCORE
-        channel_risk = rate_points + volume_points + reach_points + damage_points
+        # TOTAL
+        channel_risk = rate_points + volume_points + reach_points
         channel_risk = max(0, min(100, channel_risk))
 
-        factors = {
-            "infringement_rate": rate_points,
-            "infringement_volume": volume_points,
-            "channel_reach": reach_points,
-            "damage_done": damage_points
-        }
-
         logger.info(
-            f"Channel {channel_id}: risk={channel_risk} "
-            f"(rate={rate_points}, vol={volume_points}, reach={reach_points}, damage={damage_points}) "
-            f"| {confirmed_infringements}/{total_videos_scanned} infractions, "
-            f"{subscriber_count:,} subs, ~{estimated_infringing_views:,} infringing views"
+            f"Channel {channel_id}: risk={channel_risk} | "
+            f"{confirmed}/{total_scanned} = {rate_pct:.1f}% infringement | "
+            f"{subscriber_count:,} subs | "
+            f"rate={rate_points}, vol={volume_points}, reach={reach_points}"
         )
 
         return {
             "channel_risk": channel_risk,
-            "factors": factors,
+            "factors": {
+                "infringement_rate": rate_points,
+                "infringement_volume": volume_points,
+                "reach": reach_points
+            },
+            "stats": {
+                "confirmed_infringements": confirmed,
+                "total_videos_scanned": total_scanned,
+                "rate_percentage": round(rate_pct, 1),
+                "subscriber_count": subscriber_count
+            }
         }
+
+    def get_channel_tier(self, channel_risk: int) -> str:
+        """
+        Get channel tier based on risk score.
+
+        Tiers determine scan frequency for new videos from this channel.
+        """
+        if channel_risk >= 70:
+            return "HIGH_RISK"      # Scan all videos immediately
+        elif channel_risk >= 40:
+            return "MEDIUM_RISK"    # Scan within 24h
+        elif channel_risk >= 15:
+            return "LOW_RISK"       # Normal priority
+        else:
+            return "UNKNOWN"        # New/clean channel

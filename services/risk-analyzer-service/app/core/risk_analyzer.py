@@ -16,7 +16,7 @@ from datetime import datetime, UTC
 from google.cloud import firestore, pubsub_v1
 
 from .channel_updater import ChannelUpdater
-from .risk_rescorer import RiskRescorer
+from .infringement_risk_calculator import InfringementRiskCalculator
 from .scan_priority_calculator import ScanPriorityCalculator
 from .view_velocity_tracker import ViewVelocityTracker
 from app.utils.logging_utils import log_exception_json
@@ -51,10 +51,10 @@ class RiskAnalyzer:
         self.subscriber = pubsub_subscriber
 
         # Initialize components
-        self.rescorer = RiskRescorer(firestore_client)
         self.channel_updater = ChannelUpdater(firestore_client)
         self.velocity_tracker = ViewVelocityTracker(firestore_client)
         self.priority_calculator = ScanPriorityCalculator(firestore_client)
+        self.infringement_calculator = InfringementRiskCalculator()
 
         logger.info("RiskAnalyzer initialized")
 
@@ -86,25 +86,26 @@ class RiskAnalyzer:
 
             video_data = doc.to_dict()
 
-            # Calculate comprehensive scan priority
+            # Calculate scan priority (pre-scan: should we scan this?)
             priority_result = await self.priority_calculator.calculate_priority(video_data)
 
             scan_priority = priority_result["scan_priority"]
             priority_tier = priority_result["priority_tier"]
             channel_risk = priority_result["channel_risk"]
-            video_risk = priority_result["video_risk"]
 
             logger.info(
                 f"Video {video_id}: scan_priority={scan_priority}, tier={priority_tier}, "
-                f"channel_risk={channel_risk}, video_risk={video_risk}"
+                f"channel_risk={channel_risk}"
             )
 
-            # Update video with scan priority (no scheduling - just priority queue)
+            # Update video with scan priority
+            # infringement_risk stays 0 until Gemini scans and finds something
             doc_ref.update({
                 "scan_priority": scan_priority,
                 "priority_tier": priority_tier,
                 "channel_risk": channel_risk,
-                "video_risk": video_risk,
+                "infringement_risk": 0,  # Not scanned yet
+                "risk_tier": "PENDING",  # Will be set after scan
                 "updated_at": datetime.now(UTC),
             })
 
@@ -143,7 +144,7 @@ class RiskAnalyzer:
 
             video_data = doc.to_dict()
 
-            # Calculate comprehensive scan priority
+            # Calculate scan priority (pre-scan: should we scan this?)
             import asyncio
             priority_result = asyncio.run(
                 self.priority_calculator.calculate_priority(video_data)
@@ -152,19 +153,20 @@ class RiskAnalyzer:
             scan_priority = priority_result["scan_priority"]
             priority_tier = priority_result["priority_tier"]
             channel_risk = priority_result["channel_risk"]
-            video_risk = priority_result["video_risk"]
 
             logger.info(
                 f"Video {video_id}: scan_priority={scan_priority}, tier={priority_tier}, "
-                f"channel_risk={channel_risk}, video_risk={video_risk}"
+                f"channel_risk={channel_risk}"
             )
 
-            # Update video with scan priority (no scheduling - just priority queue)
+            # Update video with scan priority
+            # infringement_risk stays 0 until Gemini scans and finds something
             doc_ref.update({
                 "scan_priority": scan_priority,
                 "priority_tier": priority_tier,
                 "channel_risk": channel_risk,
-                "video_risk": video_risk,
+                "infringement_risk": 0,  # Not scanned yet
+                "risk_tier": "PENDING",  # Will be set after scan
                 "updated_at": datetime.now(UTC),
             })
 
@@ -219,14 +221,12 @@ class RiskAnalyzer:
 
                     new_scan_priority = priority_result["scan_priority"]
                     new_channel_risk = priority_result["channel_risk"]
-                    new_video_risk = priority_result["video_risk"]
 
                     # Update video with new scores
                     doc_ref.update({
                         "scan_priority": new_scan_priority,
                         "priority_tier": priority_result["priority_tier"],
                         "channel_risk": new_channel_risk,
-                        "video_risk": new_video_risk,
                     })
 
                     stats["videos_processed"] += 1
@@ -307,8 +307,12 @@ class RiskAnalyzer:
         """
         Process vision analysis feedback (async version for webhooks).
 
-        When vision analyzer finds an infringement, it updates channel data.
-        This triggers recalculation of ALL pending videos from that channel.
+        NEW MODEL:
+        - If NO infringement: infringement_risk = 0, risk_tier = CLEAR
+        - If INFRINGEMENT: Calculate damage score with InfringementRiskCalculator
+
+        Also updates channel infringement counts and recalculates priorities
+        for other pending videos from the same channel.
 
         Args:
             message_data: Feedback from vision-analyzer-service
@@ -317,23 +321,58 @@ class RiskAnalyzer:
             video_id = message_data.get("video_id", "")
             channel_id = message_data.get("channel_id", "")
             contains_infringement = message_data.get("contains_infringement", False)
+            gemini_result = message_data.get("gemini_result", {})
 
             logger.info(
                 f"Received vision feedback for video {video_id} from channel {channel_id}: "
                 f"infringement={contains_infringement}"
             )
 
-            # Update channel infringement counts
+            # 1. Update channel infringement counts
             self.channel_updater.update_after_analysis(
                 channel_id=channel_id,
                 video_id=video_id,
                 contains_infringement=contains_infringement
             )
 
-            # Always recalculate - both positive (infringement) and negative (clean) feedback matters!
-            # Clean videos should LOWER channel risk over time
+            # 2. Calculate infringement risk for the scanned video
+            video_ref = self.firestore.collection("videos").document(video_id)
+            video_doc = video_ref.get()
 
-            # Find all pending/discovered videos from this channel
+            if video_doc.exists:
+                video_data = video_doc.to_dict()
+
+                # Get channel data for reach calculation
+                channel_ref = self.firestore.collection("channels").document(channel_id)
+                channel_doc = channel_ref.get()
+                channel_data = channel_doc.to_dict() if channel_doc.exists else {}
+
+                # Calculate infringement risk (0 if clean, scored if infringement)
+                risk_result = self.infringement_calculator.calculate(
+                    video=video_data,
+                    channel=channel_data,
+                    gemini_result=gemini_result
+                )
+
+                infringement_risk = risk_result["infringement_risk"]
+                risk_tier = risk_result["risk_tier"]
+                risk_factors = risk_result["factors"]
+
+                # Update the scanned video
+                video_ref.update({
+                    "infringement_risk": infringement_risk,
+                    "risk_tier": risk_tier,
+                    "risk_factors": risk_factors,
+                    "updated_at": datetime.now(UTC),
+                })
+
+                logger.info(
+                    f"Video {video_id}: infringement_risk={infringement_risk}, "
+                    f"risk_tier={risk_tier}, factors={risk_factors}"
+                )
+
+            # 3. Recalculate priorities for OTHER pending videos from this channel
+            # (channel risk changed, affects their scan priority)
             videos_query = (
                 self.firestore.collection("videos")
                 .where("channel_id", "==", channel_id)
@@ -342,49 +381,31 @@ class RiskAnalyzer:
             )
 
             videos = list(videos_query.stream())
-            video_ids = [v.id for v in videos]
-
-            if not video_ids:
-                logger.info(f"No pending videos found for channel {channel_id}")
-                return
-
-            logger.info(
-                f"Recalculating priorities for {len(video_ids)} videos from channel {channel_id}"
-            )
-
-            # Recalculate priorities for all videos from this channel
+            pending_count = 0
 
             for video_doc in videos:
+                if video_doc.id == video_id:
+                    continue  # Skip the video we just updated
+
                 video_data = video_doc.to_dict()
 
-                # Recalculate priority with updated channel data
+                # Recalculate scan priority with updated channel data
                 priority_result = await self.priority_calculator.calculate_priority(video_data)
 
-                scan_priority = priority_result["scan_priority"]
-                priority_tier = priority_result["priority_tier"]
-                channel_risk = priority_result["channel_risk"]
-                video_risk = priority_result["video_risk"]
+                self.firestore.collection("videos").document(video_doc.id).update({
+                    "scan_priority": priority_result["scan_priority"],
+                    "priority_tier": priority_result["priority_tier"],
+                    "channel_risk": priority_result["channel_risk"],
+                    "updated_at": datetime.now(UTC),
+                })
 
-                # Update video (now higher priority based on updated channel risk)
-                self.firestore.collection("videos").document(video_doc.id).update(
-                    {
-                        "scan_priority": scan_priority,
-                        "priority_tier": priority_tier,
-                        "channel_risk": channel_risk,
-                        "video_risk": video_risk,
-                        "updated_at": datetime.now(UTC),
-                    }
-                )
+                pending_count += 1
 
+            if pending_count > 0:
                 logger.info(
-                    f"Video {video_doc.id}: priority recalculated to {priority_tier} "
-                    f"(priority={scan_priority}, channel_risk={channel_risk}, infringement_feedback={contains_infringement})"
+                    f"Recalculated priorities for {pending_count} pending videos "
+                    f"from channel {channel_id}"
                 )
-
-            logger.info(
-                f"Successfully recalculated priorities for {len(video_ids)} videos "
-                f"from channel {channel_id}"
-            )
 
         except Exception as e:
             log_exception_json(logger, "Error processing vision feedback", e, severity="ERROR")
