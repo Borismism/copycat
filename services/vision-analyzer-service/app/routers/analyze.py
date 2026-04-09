@@ -20,6 +20,7 @@ router = APIRouter()
 
 # Configuration constants
 MINIMUM_SCAN_PRIORITY = 0  # Scan everything from top to bottom until budget depleted
+MINIMUM_DURATION_SECONDS = 5  # Skip videos with duration < 5 seconds (likely live streams or invalid)
 
 
 class PubSubMessage(BaseModel):
@@ -140,6 +141,38 @@ async def analyze_video(request: Request):
             return Response(
                 content=json.dumps({"status": "skipped", "video_id": video_id}),
                 status_code=200,
+                media_type="application/json"
+            )
+
+        # Check duration - skip videos with duration=0 (live streams) or very short
+        video_duration = scan_message.metadata.duration_seconds
+        if video_duration < MINIMUM_DURATION_SECONDS:
+            skip_reason = "live_stream" if video_duration == 0 else "duration_too_short"
+            logger.info(
+                f"⏭️  Skipping video {video_id}: duration={video_duration}s < "
+                f"minimum {MINIMUM_DURATION_SECONDS}s (reason: {skip_reason})"
+            )
+
+            # Update video status to skipped
+            try:
+                doc_ref = firestore_client.collection(settings.firestore_videos_collection).document(video_id)
+                doc_ref.update({
+                    "status": "skipped",
+                    "skip_reason": skip_reason,
+                    "skip_details": f"duration={video_duration}s, minimum={MINIMUM_DURATION_SECONDS}s",
+                    "skipped_at": firestore.SERVER_TIMESTAMP
+                })
+            except Exception as e:
+                logger.warning(f"Failed to update skipped video status: {e}")
+
+            return Response(
+                content=json.dumps({
+                    "status": "skipped",
+                    "video_id": video_id,
+                    "reason": skip_reason,
+                    "duration": video_duration
+                }),
+                status_code=200,  # Don't retry - this video can't be analyzed
                 media_type="application/json"
             )
 
@@ -416,6 +449,14 @@ async def analyze_video(request: Request):
                 error_message = f"Gemini API returned invalid JSON: {error_str[:200]}"
                 logger.error(f"Video {video_id} failed due to Gemini JSON parse error")
                 response_code = 200  # Don't retry - Gemini bug won't fix itself
+
+            elif "400" in error_str or "INVALID_ARGUMENT" in error_str:
+                # Bad request - permanent failure (video has invalid params like duration=0)
+                video_status = "failed"
+                scan_status = "failed"
+                error_message = f"Invalid video parameters: {error_str[:200]}"
+                logger.warning(f"Video {video_id} has invalid parameters (400 INVALID_ARGUMENT)")
+                response_code = 200  # Don't retry - video params won't change
 
             else:
                 # Unknown error - return 500 for limited retry

@@ -562,16 +562,62 @@ async def cleanup_stuck_videos():
                     })
                     scan_history_count += 1
 
+        # ALSO: Clean up orphaned scan_history entries directly
+        # These can exist when:
+        # 1. Video status changed (skipped, analyzed) but scan_history still "running"
+        # 2. PubSub retries create new scan_history but old ones stay "running"
+        orphaned_scans_cleaned = 0
+        scan_history_ref = firestore_client.collection("scan_history")
+        running_scans = scan_history_ref.where("status", "==", "running").stream()
+
+        for scan_doc in running_scans:
+            scan_data = scan_doc.to_dict()
+            started_at = scan_data.get("started_at")
+
+            if not started_at:
+                # No timestamp - definitely orphaned
+                scan_doc.reference.update({
+                    "status": "failed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "error_message": "Orphaned scan (no started_at timestamp)",
+                })
+                orphaned_scans_cleaned += 1
+                continue
+
+            # Convert to datetime
+            if hasattr(started_at, "timestamp"):
+                started_dt = datetime.fromtimestamp(started_at.timestamp(), tz=timezone.utc)
+            else:
+                started_dt = started_at
+
+            if started_dt.tzinfo is None:
+                started_dt = started_dt.replace(tzinfo=timezone.utc)
+
+            # If scan is older than threshold, mark as failed
+            if started_dt < cutoff_time:
+                stuck_mins = (datetime.now(timezone.utc) - started_dt).total_seconds() / 60
+                scan_doc.reference.update({
+                    "status": "failed",
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "error_message": f"Scan stuck for {int(stuck_mins)} minutes (cleanup cron)",
+                })
+                orphaned_scans_cleaned += 1
+                logger.warning(
+                    f"Cleaned orphaned scan {scan_doc.id} for video {scan_data.get('video_id')} "
+                    f"(stuck {int(stuck_mins)}m)"
+                )
+
         logger.info(
             f"Cleanup complete: marked {marked_count} videos as failed, "
-            f"updated {scan_history_count} scan history entries"
+            f"updated {scan_history_count} scan history entries, "
+            f"cleaned {orphaned_scans_cleaned} orphaned scans"
         )
 
         return CleanupResponse(
             success=True,
-            message=f"Marked {marked_count} stuck videos as failed",
+            message=f"Marked {marked_count} stuck videos as failed, cleaned {orphaned_scans_cleaned} orphaned scans",
             videos_marked_failed=marked_count,
-            scan_history_updated=scan_history_count
+            scan_history_updated=scan_history_count + orphaned_scans_cleaned
         )
 
     except Exception as e:

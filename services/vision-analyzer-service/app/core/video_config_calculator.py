@@ -65,10 +65,16 @@ class VideoConfigCalculator:
     - 24-hour stream @ 0.003 FPS: 30,000 tokens = $0.009 (1 frame per 5 min)
     """
 
-    # Maximum frames per video (prevents Gemini from producing too much output)
-    MAX_FRAMES = 300  # Cap at 300 frames to keep output under 20k tokens
+    # Token budget per video - keeps cost under €0.01 ($0.011)
+    # At $0.30/1M input tokens: 30,000 tokens = $0.009
+    MAX_INPUT_TOKENS = 30_000  # ~€0.008 per video
 
-    # NOTE: No MAX_DURATION_SECONDS - we analyze FULL videos by dynamically adjusting FPS
+    # Maximum video duration we can analyze (audio tokens = 32/sec)
+    # At 30k tokens budget with minimal frames: 30000 / 32 = 937 seconds = ~15 min of audio only
+    # For longer videos, we MUST skip portions or the audio alone exceeds budget
+    MAX_ANALYZABLE_DURATION = 900  # 15 minutes - analyze middle portion of longer videos
+
+    # NOTE: For videos longer than MAX_ANALYZABLE_DURATION, we analyze the middle portion
 
     # Base FPS by risk tier (before length adjustments)
     RISK_FPS_MULTIPLIER = {
@@ -77,6 +83,7 @@ class VideoConfigCalculator:
         "MEDIUM": 1.0,  # Standard FPS
         "LOW": 0.75,  # 25% less FPS
         "VERY_LOW": 0.5,  # Half FPS
+        "PENDING": 1.0,  # Treat unscored videos as MEDIUM
     }
 
     def calculate_config(
@@ -116,28 +123,46 @@ class VideoConfigCalculator:
         # Clamp FPS to reasonable bounds
         final_fps = max(0.05, min(1.0, final_fps))  # 0.05 to 1.0 FPS
 
-        # Step 4: Calculate offsets (skip intro/outro)
-        start_offset, end_offset = self._calculate_offsets(duration_seconds)
+        # Step 4: Calculate offsets - for long videos, analyze middle portion only
+        if duration_seconds > self.MAX_ANALYZABLE_DURATION:
+            # Analyze middle portion of the video
+            skip_each_side = (duration_seconds - self.MAX_ANALYZABLE_DURATION) // 2
+            start_offset = skip_each_side
+            end_offset = duration_seconds - skip_each_side
+            logger.info(
+                f"Video {video_id} is {duration_seconds}s ({duration_seconds/60:.0f}min). "
+                f"Analyzing middle {self.MAX_ANALYZABLE_DURATION}s portion: {start_offset}s to {end_offset}s"
+            )
+        else:
+            start_offset, end_offset = self._calculate_offsets(duration_seconds)
 
-        # Step 5: Calculate effective duration and cost
+        # Step 5: Calculate effective duration
         effective_duration = end_offset - start_offset
 
-        # SAFETY CAP: Limit maximum frames to prevent Gemini output overflow
-        # Even with low FPS, extremely long videos could exceed output token limit
-        estimated_frames = int(final_fps * effective_duration)
-        if estimated_frames > self.MAX_FRAMES:
-            # Reduce FPS to hit the frame cap exactly
-            final_fps = self.MAX_FRAMES / effective_duration
-            logger.warning(
-                f"Video {video_id} would produce {estimated_frames} frames. "
-                f"Reducing FPS to {final_fps:.4f} to cap at {self.MAX_FRAMES} frames."
-            )
-
-        # Calculate tokens:
-        # Frame tokens: fps * 66 tokens/frame * duration
-        # Audio tokens: 32 tokens/second * duration
-        frame_tokens = int(final_fps * settings.tokens_per_frame_low_res * effective_duration)
+        # Step 6: Calculate FPS to stay within token budget
+        # Total tokens = frame_tokens + audio_tokens
+        # frame_tokens = fps * 66 * duration
+        # audio_tokens = 32 * duration
+        # MAX_TOKENS = fps * 66 * duration + 32 * duration
+        # fps = (MAX_TOKENS - 32 * duration) / (66 * duration)
         audio_tokens = settings.tokens_per_second_audio * effective_duration
+        available_for_frames = self.MAX_INPUT_TOKENS - audio_tokens
+
+        if available_for_frames <= 0:
+            # Audio alone exceeds budget - this shouldn't happen with MAX_ANALYZABLE_DURATION
+            logger.error(f"Video {video_id}: audio tokens ({audio_tokens}) exceed budget!")
+            max_fps_for_budget = 0.01  # Minimal sampling
+        else:
+            max_fps_for_budget = available_for_frames / (settings.tokens_per_frame_low_res * effective_duration)
+
+        # Use the lower of calculated FPS or budget-constrained FPS
+        final_fps = min(final_fps, max_fps_for_budget)
+
+        # Clamp FPS to reasonable bounds
+        final_fps = max(0.01, min(1.0, final_fps))
+
+        # Calculate actual tokens
+        frame_tokens = int(final_fps * settings.tokens_per_frame_low_res * effective_duration)
         total_input_tokens = frame_tokens + audio_tokens
 
         # Output tokens (for JSON response, ~500-2000 tokens typical)
@@ -196,12 +221,10 @@ class VideoConfigCalculator:
             return 0.2
         elif duration_seconds <= 3600:  # 30-60 minutes
             return 0.1
-        else:  # 60+ minutes - DYNAMIC FPS
-            # For extremely long videos, calculate FPS to stay under MAX_FRAMES
-            # Example: 3-hour movie (10,800s) → 0.0278 FPS (1 frame per 36 seconds)
-            # This ensures we NEVER truncate, just sample less frequently
-            max_fps_for_length = self.MAX_FRAMES / duration_seconds
-            return max(0.01, max_fps_for_length)  # Minimum 0.01 FPS (1 frame per 100 seconds)
+        else:  # 60+ minutes - very low FPS
+            # For extremely long videos, use minimal FPS
+            # Token budget will further constrain this in calculate_config()
+            return 0.05  # 1 frame per 20 seconds as starting point
 
     def _calculate_offsets(self, duration_seconds: int) -> tuple[int, int]:
         """

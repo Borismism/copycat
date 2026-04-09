@@ -6,8 +6,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-# Risk tiers from risk-analyzer-service
-RiskTier = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "VERY_LOW"]
+# Risk tiers from risk-analyzer-service (includes PENDING for unscanned videos)
+RiskTier = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "VERY_LOW", "PENDING"]
 
 
 class VideoMetadata(BaseModel):
