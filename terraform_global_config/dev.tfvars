@@ -19,7 +19,7 @@ artifact_repo_id = "copycat-docker"
 state_bucket = "irdeto-copycat-tf-state"
 
 # Frontend Domain & IAP
-frontend_domain      = "copycat-dev.borism.nl"
+frontend_domain      = "copycat.demo-nextnovate.com"
 iap_support_email    = "boris@nextnovate.com"
 iap_authorized_users = [
   "user:boris@nextnovate.com",

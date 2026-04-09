@@ -1,1 +1,1 @@
-bucket = "tf-state-copycat-429012"
+bucket = "irdeto-copycat-tf-state"

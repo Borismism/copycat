@@ -383,3 +383,25 @@ resource "google_firestore_index" "channels_tier_action_status_risk" {
     order      = "DESCENDING"
   }
 }
+
+# Index for: .order_by("infringement_risk", DESC).order_by("matched_ips", DESC)
+resource "google_firestore_index" "videos_infringement_risk_matched_ips" {
+  project    = var.project_id
+  database   = google_firestore_database.copycat.name
+  collection = "videos"
+
+  fields {
+    field_path = "infringement_risk"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "matched_ips"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}

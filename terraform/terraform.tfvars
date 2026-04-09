@@ -1,4 +1,4 @@
 # Terraform variables for Copycat project
-project_id  = "copycat-429012"
+project_id  = "irdeto-copycat-internal-dev"
 region      = "europe-west4"
-environment = "prod" # Using prod as your testing environment
+environment = "dev"
