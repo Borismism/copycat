@@ -26,7 +26,8 @@ iap_authorized_users = [
   "user:irdeto.poc@gmail.com",
   "user:clara@nextnovate.com",
   "user:bartjan@nextnovate.com",
-  "user:andreas.ullmann@denuvo.com"
+  "user:andreas.ullmann@denuvo.com",
+  "user:isaac@nextnovate.com"
 ]
 
 # Firestore Configuration

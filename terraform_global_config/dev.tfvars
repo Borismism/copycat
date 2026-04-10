@@ -24,7 +24,8 @@ iap_support_email    = "boris@nextnovate.com"
 iap_authorized_users = [
   "user:boris@nextnovate.com",
   "user:bartjan@nextnovate.com",
-  "user:bart@nextnovate.com"
+  "user:bart@nextnovate.com",
+  "user:isaac@nextnovate.com"
 ]
 
 # Firestore Configuration
