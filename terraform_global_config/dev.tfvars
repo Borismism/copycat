@@ -39,6 +39,6 @@ discovery_schedule = "0 */2 * * *"  # Every 2 hours (quota distributed optimally
 
 # Gemini Configuration
 gemini_location         = "europe-west1"  # Belgium - Full Gemini 2.5 Flash support
-daily_budget_eur        = "1"             # €1 for dev testing
-max_concurrent_videos   = 2               # Process 2 videos at a time (€1 budget = ~50-125 videos/day)
-max_videos_to_scan      = 10              # Queue max 10 videos per discovery run
+daily_budget_eur        = "0.25"          # €0.25 for dev testing (~16 videos/day)
+max_concurrent_videos   = 2               # Process 2 videos at a time
+max_videos_to_scan      = 20              # Budget-aware scaling caps this further
