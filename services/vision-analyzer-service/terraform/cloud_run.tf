@@ -25,7 +25,7 @@ resource "google_cloud_run_v2_service" "vision_analyzer_service" {
           cpu    = var.cpu
           memory = var.memory
         }
-        cpu_idle = false  # Always allocate CPU - async requests wait on Gemini API
+        cpu_idle = true  # Only allocate CPU during active processing, not while waiting on Gemini API
       }
 
       ports {
