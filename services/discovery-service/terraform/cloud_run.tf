@@ -99,6 +99,12 @@ resource "google_cloud_run_v2_service" "discovery_service" {
         value = tostring(var.max_videos_to_scan)
       }
 
+      # Vision budget (used to scale batch size to remaining budget)
+      env {
+        name  = "DAILY_BUDGET_EUR"
+        value = var.daily_budget_eur
+      }
+
       # Logging Configuration
       env {
         name  = "LOG_LEVEL"

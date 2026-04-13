@@ -395,10 +395,16 @@ class DiscoveryEngine:
 
         self._save_metrics(stats)
 
-        # Trigger batch vision analysis for top N unscanned videos (configurable via env)
+        # Trigger batch vision analysis, scaled to remaining budget
         try:
             max_videos = int(os.getenv("MAX_VIDEOS_TO_SCAN", "500"))
-            await self._trigger_batch_vision_analysis(limit=max_videos)
+            budget_limit = self._estimate_affordable_videos()
+            effective_limit = min(max_videos, budget_limit) if budget_limit else max_videos
+            logger.info(
+                f"Vision batch limit: budget_limit={budget_limit}, "
+                f"env_limit={max_videos}, effective={effective_limit}"
+            )
+            await self._trigger_batch_vision_analysis(limit=effective_limit)
         except Exception as e:
             logger.error(f"Failed to trigger batch vision analysis: {e}")
             # Don't fail discovery if vision trigger fails
@@ -689,6 +695,56 @@ class DiscoveryEngine:
             logger.info(f"💎 {tier} keyword: '{keyword}' ({efficiency:.1f}% efficiency, cooldown={cooldown_days}d)")
         except Exception as e:
             logger.error(f"Failed to save keyword search: {e}")
+
+    def _estimate_affordable_videos(self) -> int | None:
+        """
+        Estimate how many videos the vision budget can afford today.
+
+        Reads the budget_tracking doc from Firestore, calculates remaining budget,
+        and estimates affordable video count based on historical avg cost per video.
+        Returns None if budget info is unavailable (caller should fall back to env limit).
+        Adds 20% buffer since the vision analyzer has its own budget check as safety net.
+        """
+        AVG_COST_PER_VIDEO_EUR = 0.015  # Conservative estimate (~$0.016)
+        MIN_VIDEOS = 5  # Always queue at least a few
+        BUFFER_MULTIPLIER = 1.2  # Queue 20% more than budget allows; vision service rejects excess
+
+        try:
+            today = datetime.now(UTC).strftime("%Y-%m-%d")
+            doc = self.processor.firestore.collection("budget_tracking").document(today).get()
+
+            if not doc.exists:
+                # No budget doc yet today — assume full budget available
+                daily_budget = float(os.getenv("DAILY_BUDGET_EUR", "1"))
+                remaining = daily_budget
+            else:
+                data = doc.to_dict()
+                daily_budget = data.get("daily_budget_eur", 1.0)
+                spent = data.get("total_spent_eur", 0.0)
+                video_count = data.get("video_count", 0)
+                remaining = max(0, daily_budget - spent)
+
+                # Use actual avg cost if we have enough data, otherwise use conservative estimate
+                if video_count >= 10:
+                    AVG_COST_PER_VIDEO_EUR = spent / video_count
+
+            if remaining <= 0:
+                logger.info("Vision budget exhausted for today, skipping batch trigger")
+                return 0
+
+            affordable = int((remaining / AVG_COST_PER_VIDEO_EUR) * BUFFER_MULTIPLIER)
+            result = max(MIN_VIDEOS, affordable)
+
+            logger.info(
+                f"Budget-aware limit: remaining=€{remaining:.2f}, "
+                f"avg_cost=€{AVG_COST_PER_VIDEO_EUR:.4f}, "
+                f"affordable={affordable}, queuing={result}"
+            )
+            return result
+
+        except Exception as e:
+            logger.warning(f"Failed to read vision budget, falling back to env limit: {e}")
+            return None
 
     async def _trigger_batch_vision_analysis(self, limit: int = 500):
         """

@@ -95,6 +95,12 @@ variable "max_videos_to_scan" {
   default     = 500
 }
 
+variable "daily_budget_eur" {
+  description = "Daily vision analysis budget in EUR (used to scale batch size)"
+  type        = string
+  default     = "1"
+}
+
 variable "state_bucket" {
   description = "GCS bucket for Terraform state"
   type        = string
