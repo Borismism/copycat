@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Configuration constants
-MINIMUM_SCAN_PRIORITY = 0  # Scan everything from top to bottom until budget depleted
+MINIMUM_SCAN_PRIORITY = 0  # Base minimum (overridden dynamically by budget pressure)
 MINIMUM_DURATION_SECONDS = 5  # Skip videos with duration < 5 seconds (likely live streams or invalid)
 
 
@@ -120,7 +120,7 @@ async def analyze_video(request: Request):
             f"scan_priority={scan_priority}"
         )
 
-        # Check scan priority threshold
+        # Check scan priority threshold (static minimum)
         if scan_priority is not None and scan_priority < MINIMUM_SCAN_PRIORITY:
             logger.info(
                 f"Skipping video {video_id}: scan_priority {scan_priority} < "
@@ -175,6 +175,59 @@ async def analyze_video(request: Request):
                 status_code=200,  # Don't retry - this video can't be analyzed
                 media_type="application/json"
             )
+
+        # Budget-aware priority gate: as budget gets tighter, only accept higher-priority videos.
+        # This ensures remaining budget is spent on the most valuable targets.
+        if scan_priority is not None and budget_manager:
+            budget_remaining = budget_manager.get_remaining_budget()
+            utilization = budget_manager.get_utilization_percent()
+
+            # Ramp up the minimum priority as budget is consumed:
+            #   0-50% spent  → accept everything (priority >= 0)
+            #   50-75% spent → only MEDIUM+ (priority >= 40)
+            #   75-90% spent → only HIGH+ (priority >= 60)
+            #   90%+ spent   → only CRITICAL (priority >= 80)
+            if utilization >= 90:
+                dynamic_min = 80
+            elif utilization >= 75:
+                dynamic_min = 60
+            elif utilization >= 50:
+                dynamic_min = 40
+            else:
+                dynamic_min = 0
+
+            if scan_priority < dynamic_min:
+                logger.info(
+                    f"Budget-priority skip: video {video_id} priority={scan_priority} < "
+                    f"dynamic_min={dynamic_min} (budget {utilization:.0f}% used, "
+                    f"€{budget_remaining:.2f} remaining)"
+                )
+
+                # Reset to discovered so it can be picked up tomorrow
+                try:
+                    doc_ref = firestore_client.collection(
+                        settings.firestore_videos_collection
+                    ).document(video_id)
+                    doc_ref.update({
+                        "status": "discovered",
+                        "budget_deferred_at": firestore.SERVER_TIMESTAMP,
+                        "budget_defer_reason": (
+                            f"priority {scan_priority} < dynamic_min {dynamic_min} "
+                            f"(budget {utilization:.0f}% used)"
+                        ),
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to update deferred video status: {e}")
+
+                return Response(
+                    content=json.dumps({
+                        "status": "deferred",
+                        "video_id": video_id,
+                        "reason": f"priority {scan_priority} too low for remaining budget"
+                    }),
+                    status_code=200,
+                    media_type="application/json"
+                )
 
         # DON'T create scan_history yet - wait until we're ready to actually process
         # This prevents creating orphaned "running" scans on early failures (config issues, budget, etc.)
