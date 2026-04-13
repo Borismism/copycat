@@ -53,13 +53,13 @@ variable "max_instances" {
 variable "cpu" {
   description = "CPU allocation"
   type        = string
-  default     = "2"
+  default     = "1"
 }
 
 variable "memory" {
   description = "Memory allocation"
   type        = string
-  default     = "2Gi"
+  default     = "512Mi"
 }
 
 # Request configuration
