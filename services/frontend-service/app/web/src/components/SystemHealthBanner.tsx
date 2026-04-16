@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { ServiceHealth, ServiceStatus } from '../types'
+import { nowMs } from '../utils/frozenTime'
 
 interface SystemHealthBannerProps {
   services: ServiceHealth[]
@@ -50,7 +51,7 @@ const getOverallStatus = (services: ServiceHealth[]) => {
 export default function SystemHealthBanner({ services, lastUpdated }: SystemHealthBannerProps) {
   const overall = getOverallStatus(services)
   const timeSince = lastUpdated
-    ? Math.floor((Date.now() - lastUpdated.getTime()) / 1000)
+    ? Math.floor((nowMs() - lastUpdated.getTime()) / 1000)
     : 0
 
   return (

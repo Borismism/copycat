@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.core.firestore_client import firestore_client
+from app.core.frozen_time import now as frozen_now
 from app.utils.logging_utils import log_exception_json
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ def get_cached(key: str) -> Any | None:
     """Get value from cache if still valid."""
     if key in _cache:
         value, expires_at = _cache[key]
-        if datetime.now() < expires_at:
+        if frozen_now() < expires_at:
             return value
         else:
             del _cache[key]
@@ -31,7 +32,7 @@ def get_cached(key: str) -> Any | None:
 
 def set_cache(key: str, value: Any, ttl_seconds: int = _CACHE_TTL_SECONDS):
     """Set value in cache with TTL."""
-    expires_at = datetime.now() + timedelta(seconds=ttl_seconds)
+    expires_at = frozen_now() + timedelta(seconds=ttl_seconds)
     _cache[key] = (value, expires_at)
 
 
@@ -68,7 +69,7 @@ async def get_hourly_stats(hours: int = 24, start_date: str | None = None):
             start = start.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
             # Use current day (midnight to now/midnight)
-            now = datetime.now(UTC)
+            now = frozen_now(UTC)
             start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Initialize hourly buckets (UTC)
@@ -170,7 +171,7 @@ async def get_daily_stats(days: int = 30, start_date: str | None = None):
             days = (next_month - start).days
         else:
             # Current month: start from 1st of current month
-            now = datetime.now(UTC)
+            now = frozen_now(UTC)
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
             # Calculate days in current month
@@ -268,7 +269,7 @@ async def get_system_health():
                     "title": f"YouTube quota at {quota_utilization*100:.1f}%",
                     "message": f"{quota_used:,} / {quota_total:,} units used",
                     "action": "Reduce discovery frequency or request quota increase",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": frozen_now().isoformat(),
                 })
             elif quota_utilization >= 0.85:
                 warnings.append({
@@ -277,7 +278,7 @@ async def get_system_health():
                     "title": f"YouTube quota at {quota_utilization*100:.1f}%",
                     "message": f"{quota_used:,} / {quota_total:,} units used",
                     "action": "Monitor usage closely",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": frozen_now().isoformat(),
                 })
         except Exception as e:
             warnings.append({
@@ -286,12 +287,12 @@ async def get_system_health():
                 "title": "Unable to check quota status",
                 "message": str(e),
                 "action": "Check quota manually in GCP Console",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": frozen_now().isoformat(),
             })
 
         # Check budget usage (if vision analyzer is running)
         try:
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = frozen_now().strftime("%Y-%m-%d")
             budget_doc = firestore_client.db.collection("gemini_budget").document(today).get()
 
             if budget_doc.exists:
@@ -307,7 +308,7 @@ async def get_system_health():
                         "title": f"Gemini budget at {budget_utilization*100:.1f}%",
                         "message": f"${total_spent:.2f} / ${daily_budget:.2f} spent",
                         "action": "Analysis will pause at limit. Consider increasing budget.",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": frozen_now().isoformat(),
                     })
                 elif budget_utilization >= 0.85:
                     warnings.append({
@@ -316,7 +317,7 @@ async def get_system_health():
                         "title": f"Gemini budget at {budget_utilization*100:.1f}%",
                         "message": f"${total_spent:.2f} / ${daily_budget:.2f} spent",
                         "action": "Monitor spending closely",
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": frozen_now().isoformat(),
                     })
         except Exception:
             # Budget collection may not exist yet (vision analyzer not deployed)
@@ -334,7 +335,7 @@ async def get_system_health():
                         "title": "Discovery run completed",
                         "message": f"{videos_discovered} new videos found",
                         "action": None,
-                        "timestamp": last_run.get("timestamp", datetime.now()).isoformat(),
+                        "timestamp": last_run.get("timestamp", frozen_now()).isoformat(),
                     })
         except Exception:
             pass
@@ -343,7 +344,7 @@ async def get_system_health():
             "alerts": alerts,
             "warnings": warnings,
             "info": info,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": frozen_now().isoformat(),
         }
 
     except Exception as e:
@@ -382,7 +383,7 @@ async def get_performance_metrics():
         # Note: Direct service-to-service calls don't work in Cloud Run (not Kubernetes)
         # Vision analyzer updates budget_tracking collection in Firestore
         try:
-            today = datetime.now(UTC).strftime("%Y-%m-%d")
+            today = frozen_now(UTC).strftime("%Y-%m-%d")
             budget_doc = firestore_client.db.collection("budget_tracking").document(today).get()
             if budget_doc.exists:
                 budget_data = budget_doc.to_dict()
@@ -492,7 +493,7 @@ async def get_recent_events(limit: int = 20):
                     "type": "discovery",
                     "title": "Discovery run completed",
                     "message": f"{data.get('videos_discovered', 0)} videos discovered, {data.get('quota_used', 0)} quota used",
-                    "timestamp": data.get("timestamp", datetime.now()).isoformat(),
+                    "timestamp": data.get("timestamp", frozen_now()).isoformat(),
                     "icon": "🔍",
                 })
         except Exception:
@@ -522,7 +523,7 @@ async def get_recent_events(limit: int = 20):
                             "type": "infringement",
                             "title": f"Infringement detected: {video.get('title', 'Unknown')[:50]}...",
                             "message": f"{confidence}% confidence",
-                            "timestamp": video.get("updated_at", datetime.now()).isoformat(),
+                            "timestamp": video.get("updated_at", frozen_now()).isoformat(),
                             "icon": "⚠️",
                             "video_id": video.get("video_id"),
                         })
@@ -600,7 +601,7 @@ async def get_character_detection_stats():
         return {
             "characters": character_stats,
             "total_infringements": total_infringements,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": frozen_now().isoformat(),
         }
 
     except Exception as e:
@@ -625,7 +626,7 @@ async def get_analytics_overview():
             "summary": summary,
             "health": health,
             "metrics": metrics,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": frozen_now().isoformat(),
         }
 
     except Exception as e:

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from google.cloud import firestore
 
 from app.core.config import settings
+from app.core.frozen_time import now as frozen_now
 from app.models import ChannelProfile, ChannelStats, ChannelTier, VideoMetadata, VideoStatus
 
 logger = logging.getLogger(__name__)
@@ -259,7 +260,7 @@ class FirestoreClient:
             channel_data = {
                 "channel_id": channel_id,
                 "channel_title": data.get("channel_title", "Unknown"),
-                "discovered_at": data.get("discovered_at", datetime.now(UTC)),  # Required field!
+                "discovered_at": data.get("discovered_at", frozen_now(UTC)),  # Required field!
                 "total_videos_found": total_videos_found,  # Pre-aggregated
                 "confirmed_infringements": confirmed_infringements,  # Pre-aggregated
                 "videos_cleared": videos_cleared,  # Pre-aggregated
@@ -314,7 +315,7 @@ class FirestoreClient:
         cache_key = "channel_stats"
         if hasattr(self, '_stats_cache') and cache_key in self._stats_cache:
             cached_value, expires_at = self._stats_cache[cache_key]
-            if datetime.now(UTC) < expires_at:
+            if frozen_now(UTC) < expires_at:
                 return cached_value
 
         stats = ChannelStats()
@@ -339,7 +340,7 @@ class FirestoreClient:
         # Cache for 60 seconds
         if not hasattr(self, '_stats_cache'):
             self._stats_cache = {}
-        self._stats_cache[cache_key] = (stats, datetime.now(UTC) + timedelta(seconds=60))
+        self._stats_cache[cache_key] = (stats, frozen_now(UTC) + timedelta(seconds=60))
 
         return stats
 
@@ -372,7 +373,7 @@ class FirestoreClient:
 
     async def get_24h_summary(self) -> dict:
         """Get 24-hour activity summary."""
-        now = datetime.now(UTC)
+        now = frozen_now(UTC)
         yesterday = now - timedelta(hours=24)
 
         # Count videos discovered in last 24h - USE AGGREGATION!

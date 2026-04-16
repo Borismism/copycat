@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from app.core.auth import get_current_user, require_role
 from app.core.discovery_client import discovery_client
 from app.core.firestore_client import firestore_client
+from app.core.frozen_time import now as frozen_now
 from app.models import ServiceHealth, ServiceStatus, SystemStatus, SystemSummary, UserInfo, UserRole
 
 router = APIRouter()
@@ -21,7 +22,7 @@ async def _get_services_status_internal() -> list[ServiceHealth]:
         ServiceHealth(
             service_name="discovery-service",
             status=ServiceStatus.HEALTHY,
-            last_check=datetime.now(),
+            last_check=frozen_now(),
             url=discovery_client.base_url,
             error=None,
         )
@@ -32,7 +33,7 @@ async def _get_services_status_internal() -> list[ServiceHealth]:
         ServiceHealth(
             service_name="vision-analyzer-service",
             status=ServiceStatus.HEALTHY,
-            last_check=datetime.now(),
+            last_check=frozen_now(),
             url="PubSub-triggered",
             error=None,
         )
@@ -71,5 +72,5 @@ async def get_system_status(user: UserInfo = Depends(get_current_user)):
     return SystemStatus(
         services=services,
         summary=summary,
-        timestamp=datetime.now(),
+        timestamp=frozen_now(),
     )

@@ -9,17 +9,18 @@ import AlertCenter from '../components/AlertCenter'
 import RecentActivityFeed from '../components/RecentActivityFeed'
 import PerformanceGauges from '../components/PerformanceGauges'
 import { usePermissions } from '../hooks/usePermissions'
+import { now as frozenNow } from '../utils/frozenTime'
 
 export default function Dashboard() {
   const { isClient, canViewAdminMetrics } = usePermissions()
-  const [lastUpdated, setLastUpdated] = useState(new Date())
-  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [lastUpdated, setLastUpdated] = useState(frozenNow())
+  const [selectedDate, setSelectedDate] = useState(frozenNow())
   const [viewMode, setViewMode] = useState<'hourly' | 'daily'>('hourly')
   const [metricsTimeRange, setMetricsTimeRange] = useState('24h')
 
   // Format selected date for API (YYYY-MM-DD in UTC)
   const startDateParam = selectedDate.toISOString().split('T')[0]
-  const now = new Date()
+  const now = frozenNow()
   const isToday = selectedDate.toDateString() === now.toDateString()
   const isSameMonth = selectedDate.getMonth() === now.getMonth() &&
                       selectedDate.getFullYear() === now.getFullYear()
@@ -110,7 +111,7 @@ export default function Dashboard() {
   // Update last updated time whenever data changes
   useEffect(() => {
     if (services || summary || hourlyStats || dailyStats) {
-      setLastUpdated(new Date())
+      setLastUpdated(frozenNow())
     }
   }, [services, summary, hourlyStats, dailyStats])
 
@@ -316,7 +317,7 @@ export default function Dashboard() {
                           </svg>
                         </button>
                         <button
-                          onClick={() => setSelectedDate(new Date())}
+                          onClick={() => setSelectedDate(frozenNow())}
                           className="px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                           disabled={viewMode === 'hourly' ? isToday : isSameMonth}
                         >

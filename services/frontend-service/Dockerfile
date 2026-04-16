@@ -1,6 +1,11 @@
 # Stage 1: Build React SPA
 FROM node:20 AS frontend-build
 
+# Optional build-time frozen time for demo mode (ISO 8601).
+# When set, the dashboard pins "now" to this instant. Leave empty for live mode.
+ARG VITE_DEMO_FROZEN_TIME=""
+ENV VITE_DEMO_FROZEN_TIME=${VITE_DEMO_FROZEN_TIME}
+
 WORKDIR /web
 
 # Copy package files

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.core.firestore_client import firestore_client
+from app.core.frozen_time import now as frozen_now
 from app.models import UserInfo, UserRole
 
 router = APIRouter()
@@ -108,7 +109,7 @@ def get_vertex_ai_usage(project_id: str = "copycat-429012") -> dict:
     global _budget_cache, _cache_timestamp
 
     # Check cache
-    now = datetime.now(UTC)
+    now = frozen_now(UTC)
     if _budget_cache and _cache_timestamp:
         cache_age = (now - _cache_timestamp).total_seconds()
         if cache_age < CACHE_TTL_SECONDS:
@@ -294,7 +295,7 @@ async def get_vision_budget_stats():
     try:
         # Get budget configuration from budget_tracking collection
         # The vision-analyzer-service stores the actual configured budget there
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        today = frozen_now(UTC).strftime("%Y-%m-%d")
 
         # Try to get from budget_tracking first (newer collection)
         budget_tracking_doc = firestore_client.db.collection("budget_tracking").document(today).get()
@@ -314,7 +315,7 @@ async def get_vision_budget_stats():
             avg_processing_time = tracking_data.get("avg_processing_time_seconds", 1.2)
             processing_rate = tracking_data.get("processing_rate_per_hour", 0.0)
             cache_age = 0
-            last_updated_val = tracking_data.get("last_updated", datetime.now(UTC))
+            last_updated_val = tracking_data.get("last_updated", frozen_now(UTC))
             # Convert Firestore DatetimeWithNanoseconds to ISO string
             last_updated = last_updated_val.isoformat() if hasattr(last_updated_val, 'isoformat') else str(last_updated_val)
         else:
@@ -328,7 +329,7 @@ async def get_vision_budget_stats():
             avg_processing_time = 1.2
             processing_rate = 0.0
             cache_age = 0
-            last_updated = datetime.now(UTC).isoformat()
+            last_updated = frozen_now(UTC).isoformat()
 
         budget_remaining_eur = max(0, daily_budget_eur - budget_used_eur)
         utilization = (budget_used_eur / daily_budget_eur) * 100 if daily_budget_eur > 0 else 0
@@ -374,7 +375,7 @@ async def get_vision_analytics():
     """
     try:
         # Get current time
-        now = datetime.now(UTC)
+        now = frozen_now(UTC)
         start_24h = now - timedelta(hours=24)
 
         # SUPER OPTIMIZED: Use COUNT aggregations instead of streaming all docs

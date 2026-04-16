@@ -1,6 +1,7 @@
 import type { SystemSummary } from '../types'
 import type { PerformanceMetrics } from '../api/analytics'
 import { usePermissions } from '../hooks/usePermissions'
+import { now as frozenNow } from '../utils/frozenTime'
 
 interface MetricsGridProps {
   summary: SystemSummary
@@ -82,7 +83,7 @@ export default function MetricsGrid({ summary, metrics, timeRange = '24h' }: Met
       case '30d': return 24 * 30
       case '1y': return 24 * 365
       case 'this_year':
-        const now = new Date()
+        const now = frozenNow()
         const startOfYear = new Date(now.getFullYear(), 0, 1)
         return Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60))
       case 'all_time': return 24 * 365 * 10 // Assume 10 years max

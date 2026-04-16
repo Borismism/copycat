@@ -141,6 +141,11 @@ build_and_push_image() {
     local source_hash=$(find "$service_dir/app" -type f \( -name "*.py" -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \) -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 | head -c 8)
     local git_sha=$(git rev-parse --short HEAD)
     local image_tag="${git_sha}-${source_hash}"
+    # Frontend: include frozen-time flag in tag so flipping the flag triggers a rebuild.
+    if [[ "$service" == "frontend-service" && -n "${VITE_DEMO_FROZEN_TIME:-}" ]]; then
+        local frozen_hash=$(echo -n "$VITE_DEMO_FROZEN_TIME" | shasum | cut -c1-6)
+        image_tag="${image_tag}-frozen${frozen_hash}"
+    fi
     local image_url="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${service}:${image_tag}"
 
     log_info "Image: $image_url" >&2
@@ -155,11 +160,17 @@ build_and_push_image() {
     # Configure Docker auth
     gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet >&2
 
+    # Build args (frontend reads VITE_DEMO_FROZEN_TIME to pin demo clock).
+    local build_args=()
+    if [[ "$service" == "frontend-service" ]]; then
+        build_args+=(--build-arg "VITE_DEMO_FROZEN_TIME=${VITE_DEMO_FROZEN_TIME:-}")
+    fi
+
     # Check if docker is available
     if command -v docker &>/dev/null && docker info &>/dev/null; then
         # Build locally with Docker
         log_info "Building with Docker (local)..." >&2
-        docker build --platform linux/amd64 -t "$image_url" "$service_dir" >&2
+        docker build --platform linux/amd64 "${build_args[@]}" -t "$image_url" "$service_dir" >&2
 
         # Push to Artifact Registry
         log_info "Pushing to Artifact Registry..." >&2
