@@ -389,19 +389,19 @@ async def get_performance_metrics():
                 budget_data = budget_doc.to_dict()
                 total_spent = budget_data.get("total_spent_eur", 0)
                 # Get daily budget from document (vision-analyzer stores this)
-                daily_budget = budget_data.get("daily_budget_eur", 260.0)
+                daily_budget = budget_data.get("daily_budget_eur", 1.0)
                 budget_utilization = total_spent / daily_budget if daily_budget > 0 else 0
                 logger.info(f"Budget data: spent=€{total_spent:.2f}, budget=€{daily_budget}, util={budget_utilization:.2%}")
             else:
                 logger.warning(f"No budget_tracking document found for {today}")
                 total_spent = 0
                 budget_utilization = 0
-                daily_budget = 260.0  # Fallback to configured default (EUR)
+                daily_budget = 1.0  # Demo-freeze display value (EUR)
         except Exception as e:
             log_exception_json(logger, "Failed to get budget data", e, severity="ERROR")
             total_spent = 0
             budget_utilization = 0
-            daily_budget = 260.0
+            daily_budget = 1.0
 
         # Queue health (pending videos) - use aggregation query for efficiency
         try:

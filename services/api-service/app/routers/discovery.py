@@ -13,6 +13,7 @@ from app.core.auth import get_current_user, require_role
 from app.core.config import settings
 from app.core.discovery_client import discovery_client
 from app.core.firestore_client import FirestoreClient, firestore_client, get_firestore_client
+from app.core.frozen_time import now as frozen_now
 from app.models import DiscoveryAnalytics, DiscoveryStats, DiscoveryTriggerRequest, QuotaStatus, UserInfo, UserRole
 
 router = APIRouter()
@@ -41,7 +42,7 @@ async def trigger_discovery(request: DiscoveryTriggerRequest, user: UserInfo = D
             quota_used=result.get("quota_used", 0),
             channels_tracked=result.get("channels_tracked", 0),
             duration_seconds=result.get("duration_seconds", 0.0),
-            timestamp=datetime.now(),
+            timestamp=frozen_now(),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to trigger discovery: {e!s}")
@@ -100,12 +101,12 @@ async def get_quota_status(
     Updated automatically after discovery runs and on-demand via /quota/refresh.
     """
     try:
-        from datetime import datetime, UTC
+        from datetime import UTC
         from zoneinfo import ZoneInfo
 
         # Get today's date in Pacific Time (YouTube API quota resets at midnight PT)
         pacific_tz = ZoneInfo("America/Los_Angeles")
-        now_pacific = datetime.now(UTC).astimezone(pacific_tz)
+        now_pacific = frozen_now(UTC).astimezone(pacific_tz)
         today_key = now_pacific.strftime("%Y-%m-%d")
 
         # Read from Firestore quota_usage collection
@@ -160,7 +161,7 @@ async def get_discovery_analytics(user: UserInfo = Depends(get_current_user)):
             quota_used=quota_stats.used_quota,
             channels_tracked=channel_stats.total,
             duration_seconds=0.0,
-            timestamp=datetime.now(),
+            timestamp=frozen_now(),
         )
 
         # Calculate efficiency

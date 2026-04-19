@@ -1,12 +1,13 @@
 """Admin endpoints for background jobs and system maintenance."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import get_current_user, require_role
 from app.core.firestore_client import firestore_client
+from app.core.frozen_time import now as frozen_now
 from app.models import DailyStats, UserInfo, UserRole
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ async def aggregate_daily_stats_job(
     """
     try:
         # Calculate target date (typically yesterday)
-        target_date = (datetime.now() - timedelta(days=date_offset_days)).date()
+        target_date = (frozen_now() - timedelta(days=date_offset_days)).date()
 
         logger.info(f"Starting daily stats aggregation for {target_date}")
 

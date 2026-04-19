@@ -302,7 +302,7 @@ async def get_vision_budget_stats():
 
         if budget_tracking_doc.exists:
             tracking_data = budget_tracking_doc.to_dict()
-            daily_budget_eur = tracking_data.get("daily_budget_eur", 260.0)
+            daily_budget_eur = tracking_data.get("daily_budget_eur", 1.0)
 
             # Use actual tracked budget from vision-analyzer-service
             budget_used_eur = tracking_data.get("total_spent_eur", 0.0)
@@ -320,7 +320,7 @@ async def get_vision_budget_stats():
             last_updated = last_updated_val.isoformat() if hasattr(last_updated_val, 'isoformat') else str(last_updated_val)
         else:
             # Fallback to configured default
-            daily_budget_eur = 260.0  # Configured in terraform
+            daily_budget_eur = 1.0  # Demo-freeze display value
             budget_used_eur = 0.0
             total_requests = 0
             total_input_tokens = 0
